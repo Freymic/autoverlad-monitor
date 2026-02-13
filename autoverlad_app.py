@@ -6,15 +6,15 @@ import os
 from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
-# --- CONFIG ---
-st.set_page_config(page_title="Autoverlad Live (ASTRA)", layout="wide", page_icon="🏔️")
-st_autorefresh(interval=600000, key="api_refresh")
+# --- CONFIGURATION ---
+st.set_page_config(page_title="Autoverlad Live (ASTRA API)", layout="wide", page_icon="🏔️")
+st_autorefresh(interval=600000, key="api_refresh_timer")
 DB_FILE = "wartezeiten_historie.csv"
 
-# DEIN OFFIZIELLER TOKEN
+# Dein offizieller API-Token von opentransportdata.swiss
 API_TOKEN = "eyJvcmciOiI2NDA2NTFhNTIyZmEwNTAwMDEyOWJiZTEiLCJpZCI6ImNlNjBiNTczNzRmNDQ3YjZiODUwZDA3ZTA5MmQ4ODk0IiwiaCI6Im11cm11cjEyOCJ9"
 
-# DEINE HARDCODED ÜBERSETZUNG (0 Min bis 4 Stunden)
+# Deine Hardcoded-Übersetzungstabelle (0 Min bis 4 Stunden)
 UEBERSETZUNG = {
     "4 stunden": 240, "3 stunden 45 minuten": 225, "3 stunden 30 minuten": 210,
     "3 stunden 15 minuten": 195, "3 stunden": 180, "2 stunden 45 minuten": 165,
@@ -24,7 +24,8 @@ UEBERSETZUNG = {
     "keine wartezeit": 0
 }
 
-def text_zu_min(text):
+def text_zu_minuten(text):
+    """Sucht nach den definierten Textbausteinen im API-Text."""
     if not text: return 0
     text = text.lower()
     for phrase, mins in UEBERSETZUNG.items():
@@ -33,73 +34,90 @@ def text_zu_min(text):
     return 0
 
 def fetch_astra_data():
+    """Ruft die offiziellen Datex-II Verkehrsdaten vom ASTRA ab."""
     daten = {"Realp": 0, "Oberwald": 0, "Kandersteg": 0, "Goppenstein": 0}
-    # Offizieller OJP Situations Endpoint
-    url = "https://api.opentransportdata.swiss/ojp-la-astra/v1/situations"
+    
+    # Korrekte URL für den Datex-II Pull (Traffic Situations)
+    url = "https://api.opentransportdata.swiss/ojp-la-astra/v1/datex2/v2/situations"
+    
     headers = {
         "Authorization": f"Bearer {API_TOKEN}",
         "Accept": "application/xml"
     }
     
     try:
-        response = requests.get(url, headers=headers, timeout=20)
+        response = requests.get(url, headers=headers, timeout=25)
         if response.status_code == 200:
             soup = BeautifulSoup(response.content, "xml")
-            # Wir suchen alle Meldungen (SituationRecord)
+            # Suche alle Meldungen im Feed
             records = soup.find_all("situationRecord")
             
             for record in records:
-                desc = record.find("description")
-                if desc:
-                    txt = desc.get_text()
-                    # Zuweisung basierend auf Textinhalt
-                    val = text_zu_min(txt)
-                    if "Realp" in txt: daten["Realp"] = val
-                    if "Oberwald" in txt: daten["Oberwald"] = val
-                    if "Kandersteg" in txt: daten["Kandersteg"] = val
-                    if "Goppenstein" in txt: daten["Goppenstein"] = val
+                desc_tag = record.find("description")
+                if desc_tag:
+                    txt = desc_tag.get_text()
+                    val = text_zu_minuten(txt)
+                    
+                    # Orte im Text identifizieren und höchsten Wert pro Ort speichern
+                    if "Realp" in txt: daten["Realp"] = max(daten["Realp"], val)
+                    if "Oberwald" in txt: daten["Oberwald"] = max(daten["Oberwald"], val)
+                    if "Kandersteg" in txt: daten["Kandersteg"] = max(daten["Kandersteg"], val)
+                    if "Goppenstein" in txt: daten["Goppenstein"] = max(daten["Goppenstein"], val)
         else:
-            st.error(f"API Fehler: {response.status_code}")
+            st.sidebar.error(f"API Fehler: {response.status_code}")
     except Exception as e:
-        st.error(f"Verbindungsfehler: {e}")
+        st.sidebar.error(f"Verbindungsfehler: {e}")
     return daten
 
-# --- DATENVERARBEITUNG ---
-werte = fetch_astra_data()
-jetzt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+# --- DATEN-LOGIK ---
+aktuelle_werte = fetch_astra_data()
+zeitpunkt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-# In CSV loggen
-df_new = pd.DataFrame([{"Zeit": jetzt, **werte}])
+# Speichern der Daten in der CSV-Historie
+df_neu = pd.DataFrame([{"Zeit": zeitpunkt, **aktuelle_werte}])
 if not os.path.exists(DB_FILE):
-    df_new.to_csv(DB_FILE, index=False)
+    df_neu.to_csv(DB_FILE, index=False)
 else:
-    df_new.to_csv(DB_FILE, mode='a', header=False, index=False)
+    # Nur speichern, wenn sich Werte geändert haben oder nach Zeitablauf (optional)
+    df_neu.to_csv(DB_FILE, mode='a', header=False, index=False)
 
-# --- DASHBOARD ---
+# --- DASHBOARD UI ---
 st.title("🏔️ Autoverlad Live-Monitor")
-st.markdown("Offizielle Live-Daten vom **Bundesamt für Strassen (ASTRA)**")
+st.markdown("Echtzeit-Daten vom **Bundesamt für Strassen (ASTRA)**")
 
+# Anzeige der aktuellen Wartezeiten in 4 Spalten
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Realp", f"{werte['Realp']} Min")
-c2.metric("Oberwald", f"{werte['Oberwald']} Min")
-c3.metric("Kandersteg", f"{werte['Kandersteg']} Min")
-c4.metric("Goppenstein", f"{werte['Goppenstein']} Min")
+c1.metric("Realp", f"{aktuelle_werte['Realp']} Min")
+c2.metric("Oberwald", f"{aktuelle_werte['Oberwald']} Min")
+c3.metric("Kandersteg", f"{aktuelle_werte['Kandersteg']} Min")
+c4.metric("Goppenstein", f"{aktuelle_werte['Goppenstein']} Min")
 
-# --- HISTORIE ---
+# --- HISTORIE GRAPH ---
 st.divider()
+st.subheader("📈 Wartezeiten-Verlauf (letzte 12 Stunden)")
+
 if st.sidebar.button("🗑️ Verlauf löschen"):
-    if os.path.exists(DB_FILE): os.remove(DB_FILE)
+    if os.path.exists(DB_FILE): 
+        os.remove(DB_FILE)
     st.rerun()
 
 if os.path.exists(DB_FILE):
-    df = pd.read_csv(DB_FILE).drop_duplicates()
-    df['Zeit'] = pd.to_datetime(df['Zeit'])
-    # Letzte 12 Stunden für bessere Übersicht
-    df = df[df['Zeit'] > (datetime.now() - timedelta(hours=12))].sort_values('Zeit')
-    
-    if len(df) > 1:
-        st.subheader("📈 Wartezeiten-Verlauf")
-        # Wir nutzen das native Streamlit Chart (robuster als Altair bei Fehlern)
-        st.line_chart(df.set_index('Zeit'))
+    try:
+        df = pd.read_csv(DB_FILE)
+        df['Zeit'] = pd.to_datetime(df['Zeit'])
+        # Dubletten entfernen und nach Zeit sortieren
+        df = df.drop_duplicates().sort_values('Zeit')
+        
+        # Filter auf die letzten 12 Stunden
+        limit = datetime.now() - timedelta(hours=12)
+        df_display = df[df['Zeit'] > limit]
+        
+        if not df_display.empty:
+            # Diagramm anzeigen
+            st.line_chart(df_display.set_index('Zeit'))
+        else:
+            st.info("Noch keine Daten für den gewählten Zeitraum vorhanden.")
+    except Exception as e:
+        st.error(f"Fehler beim Laden der Grafik: {e}")
 
-st.caption(f"Letzte Aktualisierung: {datetime.now().strftime('%H:%M:%S')} Uhr")
+st.caption(f"Stand: {datetime.now().strftime('%H:%M:%S')} Uhr | Datenquelle: opentransportdata.swiss")
