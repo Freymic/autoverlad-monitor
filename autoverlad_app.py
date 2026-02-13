@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime
+from datetime import datetime, timedelta
 import pandas as pd
 import os
 import altair as alt
@@ -47,7 +47,7 @@ save_to_csv(aktuelle_werte)
 st.set_page_config(page_title="Autoverlad Live", layout="wide")
 st.title("🏔️ Autoverlad Monitor")
 
-# Metriken oben
+# Metriken
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Realp", f"{aktuelle_werte['Realp']} Min")
 c2.metric("Oberwald", f"{aktuelle_werte['Oberwald']} Min")
@@ -62,31 +62,28 @@ if os.path.isfile(DB_FILE):
     df_hist = pd.read_csv(DB_FILE)
     df_hist['Zeit'] = pd.to_datetime(df_hist['Zeit'])
     
-    # Filter auf 6h
-    cutoff = datetime.now() - pd.Timedelta(hours=6)
+    # Filter auf die letzten 6 Stunden
+    cutoff = datetime.now() - timedelta(hours=6)
     df_plot = df_hist[df_hist['Zeit'] > cutoff]
 
     if not df_plot.empty:
-        # Umwandlung für Altair (Long-Format)
-        df_melted = df_plot.melt('Zeit', var_name='Ort', value_name='Wartezeit')
+        # Umwandlung ins Long-Format für Altair
+        df_melted = df_plot.melt('Zeit', var_name='Station', value_name='Wartezeit')
         
-        # Altair Chart mit Halbstundenschritten
-        chart = alt.Chart(df_melted).mark_line(interpolate='monotone', point=True).encode(
+        # Altair Diagramm mit schöner X-Achse
+        chart = alt.Chart(df_melted).mark_line(point=True).encode(
             x=alt.X('Zeit:T', 
                     title='Uhrzeit',
                     axis=alt.Axis(
                         format='%H:%M', 
-                        tickCount={'interval': 'minute', 'step': 30}, # Fixe 30-Min-Schritte
+                        tickCount={'interval': 'minute', 'step': 30}, # Halbstundenschritte
                         labelAngle=0
-                    )
-            ),
-            y=alt.Y('Wartezeit:Q', title='Minuten', scale=alt.Scale(domain=[0, 120])),
-            color=alt.Color('Ort:N', title='Station'),
-            tooltip=['Zeit:T', 'Ort:N', 'Wartezeit:Q']
+                    )),
+            y=alt.Y('Wartezeit:Q', title='Minuten', scale=alt.Scale(domain=[0, 100])),
+            color=alt.Color('Station:N', scale=alt.Scale(scheme='category10')),
+            tooltip=['Zeit:T', 'Station:N', 'Wartezeit:Q']
         ).properties(height=400).interactive()
         
         st.altair_chart(chart, use_container_width=True)
 else:
     st.info("Sammle Daten...")
-
-st.caption(f"Letztes Update: {datetime.now().strftime('%H:%M:%S')}")
