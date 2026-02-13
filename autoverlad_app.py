@@ -8,11 +8,11 @@ from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
 # --- SETUP ---
-st.set_page_config(page_title="Autoverlad Live", layout="wide", page_icon="🏔️")
-st_autorefresh(interval=600000, key="refresh_check")
+st.set_page_config(page_title="Autoverlad Monitor", layout="wide")
+st_autorefresh(interval=600000, key="refresh")
 DB_FILE = "wartezeiten_historie.csv"
 
-def get_minutes(text):
+def extract_mins(text):
     """Rechnet '1 Stunde 30 Minuten' in 90 Minuten um."""
     total = 0
     hr = re.search(r'(\d+)\s*(?:Stunde|h|Std)', text, re.IGNORECASE)
@@ -21,42 +21,39 @@ def get_minutes(text):
     if mn: total += int(mn.group(1))
     return total
 
-def fetch_all():
-    res = {"Realp": 0, "Oberwald": 0, "Kandersteg": 0, "Goppenstein": 0}
+def get_data():
+    daten = {"Realp": 0, "Oberwald": 0, "Kandersteg": 0, "Goppenstein": 0}
     try:
         # FURKA (MGB)
         r = requests.get("https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten", timeout=15)
         soup = BeautifulSoup(r.content, 'html.parser')
-        text = soup.get_text(separator=' ')
+        # Wir nehmen nur den Text zwischen 'Verkehrsinformation' und 'aktualisiert'
+        raw = soup.get_text(separator=' ')
+        clean = raw.split("Verkehrsinformation")[-1].split("aktualisiert")[0]
         
-        # WICHTIG: Wir schneiden alles ab 'zuletzt aktualisiert' weg (verhindert die 14 Min!)
-        if "Verkehrsinformation" in text:
-            text = text.split("Verkehrsinformation")[-1]
-        if "zuletzt aktualisiert" in text:
-            text = text.split("zuletzt aktualisiert")[0]
-
         for loc in ["Realp", "Oberwald"]:
-            match = re.search(f"{loc}.{{0,200}}", text, re.IGNORECASE)
+            match = re.search(f"{loc}.{{0,200}}", clean, re.IGNORECASE)
             if match:
-                s = match.group(0)
-                if "keine" not in s.lower(): res[loc] = get_minutes(s)
+                snippet = match.group(0)
+                if "keine" not in snippet.lower():
+                    daten[loc] = extract_mins(snippet)
 
         # LÖTSCHBERG (BLS)
         rl = requests.get("https://www.bls.ch/de/fahren/autoverlad/fahrplan", timeout=15)
-        t_l = BeautifulSoup(rl.content, 'html.parser').get_text(separator=' ')
+        text_l = BeautifulSoup(rl.content, 'html.parser').get_text(separator=' ')
         for loc in ["Kandersteg", "Goppenstein"]:
-            m = re.search(f"{loc}.{{0,250}}", t_l, re.IGNORECASE)
-            if m: res[loc] = get_minutes(m.group(0))
+            match = re.search(f"{loc}.{{0,250}}", text_l, re.IGNORECASE)
+            if match: daten[loc] = extract_mins(match.group(0))
     except:
         pass
-    return res
+    return daten
 
-# --- LOGIK ---
-werte = fetch_all()
+# --- EXECUTION ---
+aktuelle_werte = get_data()
 ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 # Speichern
-df_new = pd.DataFrame([{"Zeit": ts, **werte}])
+df_new = pd.DataFrame([{"Zeit": ts, **aktuelle_werte}])
 if not os.path.exists(DB_FILE):
     df_new.to_csv(DB_FILE, index=False)
 else:
@@ -65,10 +62,10 @@ else:
 # --- UI ---
 st.title("🏔️ Autoverlad Live-Monitor")
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Realp", f"{werte['Realp']} Min")
-c2.metric("Oberwald", f"{werte['Oberwald']} Min")
-c3.metric("Kandersteg", f"{werte['Kandersteg']} Min")
-c4.metric("Goppenstein", f"{werte['Goppenstein']} Min")
+c1.metric("Realp", f"{aktuelle_werte['Realp']} Min")
+c2.metric("Oberwald", f"{aktuelle_werte['Oberwald']} Min")
+c3.metric("Kandersteg", f"{aktuelle_werte['Kandersteg']} Min")
+c4.metric("Goppenstein", f"{aktuelle_werte['Goppenstein']} Min")
 
 # --- CHART ---
 st.divider()
@@ -80,12 +77,11 @@ if os.path.exists(DB_FILE):
     try:
         df = pd.read_csv(DB_FILE).drop_duplicates()
         df['Zeit'] = pd.to_datetime(df['Zeit'])
-        # Filter: Nur letzte 6h
         df = df[df['Zeit'] > (datetime.now() - timedelta(hours=6))].sort_values('Zeit')
         if len(df) > 1:
             st.subheader("📈 Verlauf")
             st.line_chart(df.set_index('Zeit'))
     except:
-        st.write("Sammle Daten...")
+        st.write("Warte auf Daten...")
 
-st.caption(f"Stand: {datetime.now().strftime('%H:%M:%S')} Uhr")
+st.caption(f"Letztes Update: {datetime.now().strftime('%H:%M:%S')}")
