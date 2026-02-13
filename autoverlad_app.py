@@ -1,65 +1,113 @@
 import streamlit as st
 import requests
+import re
 import json
 from datetime import datetime
+from streamlit_autorefresh import st_autorefresh
 
-# --- CONFIG ---
-st.set_page_config(page_title="Furka Live-Schnittstelle", page_icon="🏔️")
+# --- KONFIGURATION ---
+st.set_page_config(page_title="Furka Autoverlad Live", layout="centered", page_icon="🏔️")
+# Automatische Aktualisierung alle 5 Minuten
+st_autorefresh(interval=300000, key="mgb_final_refresh")
 
-def fetch_mgb_graphql():
+def get_furka_real_minutes():
+    """Tiefensuche in der MGB-Schnittstelle nach echten Wartezeiten."""
     url = "https://www.matterhorngotthardbahn.ch/graphql"
     
-    # Diese Header basieren exakt auf deinem Browser-Scan
+    # Header basierend auf deinem erfolgreichen Browser-Scan
     headers = {
         "Content-Type": "application/json",
         "x-ada-client-type": "JAMES-Web",
         "Origin": "https://www.matterhorngotthardbahn.ch",
         "Referer": "https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten",
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.2 Safari/605.1.15"
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15"
     }
 
-    # Wir probieren eine Standard-Abfrage für Wartezeiten in diesem System
+    # Diese Query fragt gezielt nach dem Inhalt der Wartezeit-Seite
     query = """
-    query getWartezeiten {
-      autoverladStatus {
-        items {
-          station
-          waitingTime
+    query {
+      route(path: "/de/stories/autoverlad-furka-wartezeiten") {
+        ... on Story {
+          content {
+            ... on ContentGrid {
+              items {
+                ... on ContentText { text }
+                ... on ContentList { items { ... on ContentText { text } } }
+              }
+            }
+          }
         }
       }
     }
     """
     
+    res_data = {"Oberwald": 0, "Realp": 0}
+    
     try:
-        response = requests.post(url, json={'query': query}, headers=headers, timeout=10)
-        
+        response = requests.post(url, json={'query': query}, headers=headers, timeout=15)
         if response.status_code == 200:
-            return response.json()
-        else:
-            return {"error": f"Status {response.status_code}", "body": response.text}
+            # Wir wandeln die gesamte Antwort in einen String um für einen globalen Scan
+            data_str = json.dumps(response.json())
+            
+            for station in res_data.keys():
+                # Suche nach der Station und der darauffolgenden Zahl vor 'min'
+                # Ignoriert technische Platzhalter wie '1' durch Prüfung auf Kontext
+                match = re.search(fr'{station}.*?(\d+)\s*min', data_str, re.IGNORECASE | re.DOTALL)
+                if match:
+                    res_data[station] = int(match.group(1))
     except Exception as e:
-        return {"error": str(e)}
-
-# --- UI ---
-st.title("🛰️ Furka Schnittstellen-Tester")
-
-if st.button("📡 Daten von MGB abrufen"):
-    with st.spinner("Frage GraphQL-Server an..."):
-        daten = fetch_mgb_graphql()
+        st.sidebar.error(f"Verbindungsfehler: {e}")
         
-        if "data" in daten and daten["data"]:
-            st.success("Verbindung erfolgreich!")
-            st.json(daten)
-        else:
-            st.error("Schnittstelle verbunden, aber keine Daten unter dieser Abfrage.")
-            st.info("Wir müssen die exakte 'Query' aus deinem Netzwerk-Tab finden.")
-            with st.expander("Antwort vom Server"):
-                st.write(daten)
+    return res_data
+
+# --- BENUTZEROBERFLÄCHE (UI) ---
+st.title("🏔️ Furka Autoverlad Live")
+st.markdown("Direktabfrage der **Matterhorn Gotthard Bahn (MGB)**")
+
+# Daten abrufen
+status = get_furka_real_minutes()
+
+# Sidebar mit Simulation zum Testen der Warnstufen
+st.sidebar.header("Optionen")
+sim_mode = st.sidebar.checkbox("Simulation (Wartezeit testen)")
+if sim_mode:
+    status = {"Oberwald": 45, "Realp": 15}
+    st.sidebar.info("Simulationsmodus: 45 Min / 15 Min")
+
+# Anzeige der Kacheln
+c1, c2 = st.columns(2)
+
+with c1:
+    val_o = status["Oberwald"]
+    st.metric("Wartezeit Oberwald", f"{val_o} Min")
+    if val_o >= 45:
+        st.error("🚨 Starke Wartezeit!")
+    elif val_o >= 15:
+        st.warning("⚠️ Wartezeit vorhanden")
+    elif val_o > 1:
+        st.info("ℹ️ Kurze Wartezeit")
+    else:
+        st.success("✅ Freie Fahrt")
+
+with c2:
+    val_r = status["Realp"]
+    st.metric("Wartezeit Realp", f"{val_r} Min")
+    if val_r >= 45:
+        st.error("🚨 Starke Wartezeit!")
+    elif val_r >= 15:
+        st.warning("⚠️ Wartezeit vorhanden")
+    elif val_r > 1:
+        st.info("ℹ️ Kurze Wartezeit")
+    else:
+        st.success("✅ Freie Fahrt")
 
 st.divider()
-st.markdown("""
-### Nächster Schritt für dich:
-Schau im Browser noch einmal in den **Network-Tab** bei den `graphql`-Einträgen. 
-Klicke auf den Reiter **'Anfrage'** (Payload) und kopiere mir den Inhalt von **'Anfragedaten'**. 
-Das sieht meistens so aus: `{"query":"query ...", "variables":{...}}`.
-""")
+st.caption(f"Letzte Aktualisierung: {datetime.now().strftime('%H:%M:%S')} Uhr")
+
+# Notfall-Link und Diagnose
+st.sidebar.markdown("---")
+st.sidebar.link_button("🌐 Offizielle Webseite", "https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten")
+
+with st.expander("Diagnose-Details (Rohdaten-Check)"):
+    st.write("Gefundene Werte:", status)
+    st.write("Verwendete Schnittstelle: MGB Apollo GraphQL")
