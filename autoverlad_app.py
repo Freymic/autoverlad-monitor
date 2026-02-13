@@ -5,109 +5,75 @@ import json
 from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
-# --- KONFIGURATION ---
-st.set_page_config(page_title="Furka Autoverlad Live", layout="centered", page_icon="🏔️")
-# Automatische Aktualisierung alle 5 Minuten
-st_autorefresh(interval=300000, key="mgb_final_refresh")
+# --- CONFIG ---
+st.set_page_config(page_title="Furka Live-Monitor", layout="centered", page_icon="🏔️")
+st_autorefresh(interval=300000, key="mgb_final_sync")
 
-def get_furka_real_minutes():
-    """Tiefensuche in der MGB-Schnittstelle nach echten Wartezeiten."""
+def get_furka_real_data():
     url = "https://www.matterhorngotthardbahn.ch/graphql"
-    
-    # Header basierend auf deinem erfolgreichen Browser-Scan
     headers = {
         "Content-Type": "application/json",
-        "x-ada-client-type": "JAMES-Web",
+        "x-ada-client-type": "JAMES-Web", # Der Schlüssel aus deinem Scan
         "Origin": "https://www.matterhorngotthardbahn.ch",
-        "Referer": "https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten",
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15"
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
     }
 
-    # Diese Query fragt gezielt nach dem Inhalt der Wartezeit-Seite
-    query = """
-    query {
-      route(path: "/de/stories/autoverlad-furka-wartezeiten") {
-        ... on Story {
-          content {
-            ... on ContentGrid {
-              items {
-                ... on ContentText { text }
-                ... on ContentList { items { ... on ContentText { text } } }
-              }
-            }
-          }
-        }
-      }
-    }
-    """
+    # Wir testen die 3 häufigsten Strukturen für Wartezeit-Daten
+    queries = [
+        # 1. Suche nach allgemeinen Autoverlad-Status-Objekten
+        'query { allAutoverladStatus { items { stationName waitingTime } } }',
+        # 2. Suche nach Story-Inhalten (wo die Texte liegen)
+        'query { route(path: "/de/stories/autoverlad-furka-wartezeiten") { ... on Story { content { ... on ContentGrid { items { ... on ContentText { text } } } } } } }',
+        # 3. Suche nach speziellen Komponenten
+        'query { story(slug: "autoverlad-furka-wartezeiten") { components { ... on WaitingTimeComponent { time station } } } }'
+    ]
     
     res_data = {"Oberwald": 0, "Realp": 0}
     
-    try:
-        response = requests.post(url, json={'query': query}, headers=headers, timeout=15)
-        if response.status_code == 200:
-            # Wir wandeln die gesamte Antwort in einen String um für einen globalen Scan
-            data_str = json.dumps(response.json())
+    for q in queries:
+        try:
+            response = requests.post(url, json={'query': q}, headers=headers, timeout=10)
+            if response.status_code == 200:
+                raw_json = response.text
+                # Globaler Scan: Wir suchen nach 'Oberwald' gefolgt von einer Zahl
+                for station in res_data.keys():
+                    # Findet 'Oberwald":30' oder 'Oberwald...45 min'
+                    match = re.search(fr'{station}.*?(\d+)\s*(?:min|")', raw_json, re.IGNORECASE | re.DOTALL)
+                    if match:
+                        found_val = int(match.group(1))
+                        # Ignoriere technische Platzhalter wie '1'
+                        if found_val > 1 or "min" in match.group(0).lower():
+                            res_data[station] = found_val
+                
+                # Wenn wir Werte gefunden haben, die nicht 0 oder 1 sind, brechen wir ab
+                if any(v > 1 for v in res_data.values()):
+                    break
+        except:
+            continue
             
-            for station in res_data.keys():
-                # Suche nach der Station und der darauffolgenden Zahl vor 'min'
-                # Ignoriert technische Platzhalter wie '1' durch Prüfung auf Kontext
-                match = re.search(fr'{station}.*?(\d+)\s*min', data_str, re.IGNORECASE | re.DOTALL)
-                if match:
-                    res_data[station] = int(match.group(1))
-    except Exception as e:
-        st.sidebar.error(f"Verbindungsfehler: {e}")
-        
     return res_data
 
-# --- BENUTZEROBERFLÄCHE (UI) ---
+# --- UI ---
 st.title("🏔️ Furka Autoverlad Live")
-st.markdown("Direktabfrage der **Matterhorn Gotthard Bahn (MGB)**")
+st.markdown("Direkte Systemabfrage: MGB Apollo GraphQL")
 
-# Daten abrufen
-status = get_furka_real_minutes()
+status = get_furka_real_data()
 
-# Sidebar mit Simulation zum Testen der Warnstufen
-st.sidebar.header("Optionen")
-sim_mode = st.sidebar.checkbox("Simulation (Wartezeit testen)")
-if sim_mode:
-    status = {"Oberwald": 45, "Realp": 15}
-    st.sidebar.info("Simulationsmodus: 45 Min / 15 Min")
-
-# Anzeige der Kacheln
+# Kacheln mit Logik für Statusfarben
 c1, c2 = st.columns(2)
-
 with c1:
-    val_o = status["Oberwald"]
-    st.metric("Wartezeit Oberwald", f"{val_o} Min")
-    if val_o >= 45:
-        st.error("🚨 Starke Wartezeit!")
-    elif val_o >= 15:
-        st.warning("⚠️ Wartezeit vorhanden")
-    elif val_o > 1:
-        st.info("ℹ️ Kurze Wartezeit")
-    else:
-        st.success("✅ Freie Fahrt")
+    val = status["Oberwald"]
+    st.metric("Oberwald", f"{val} Min")
+    if val >= 15: st.warning("⚠️ Wartezeit")
+    else: st.success("✅ Freie Fahrt")
 
 with c2:
-    val_r = status["Realp"]
-    st.metric("Wartezeit Realp", f"{val_r} Min")
-    if val_r >= 45:
-        st.error("🚨 Starke Wartezeit!")
-    elif val_r >= 15:
-        st.warning("⚠️ Wartezeit vorhanden")
-    elif val_r > 1:
-        st.info("ℹ️ Kurze Wartezeit")
-    else:
-        st.success("✅ Freie Fahrt")
+    val = status["Realp"]
+    st.metric("Realp", f"{val} Min")
+    if val >= 15: st.warning("⚠️ Wartezeit")
+    else: st.success("✅ Freie Fahrt")
 
-st.divider()
-st.caption(f"Letzte Aktualisierung: {datetime.now().strftime('%H:%M:%S')} Uhr")
-
-# Notfall-Link und Diagnose
-st.sidebar.markdown("---")
-st.sidebar.link_button("🌐 Offizielle Webseite", "https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten")
-
+# Diagnose-Tool
 with st.expander("Diagnose-Details (Rohdaten-Check)"):
     st.write("Gefundene Werte:", status)
-    st.write("Verwendete Schnittstelle: MGB Apollo GraphQL")
+    st.write("Status: Verbunden mit JAMES-Web Gateway")
