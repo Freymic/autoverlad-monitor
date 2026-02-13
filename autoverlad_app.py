@@ -1,66 +1,23 @@
 import streamlit as st
-import requests
-import re
-from datetime import datetime
 
-# --- KONFIGURATION ---
-st.set_page_config(page_title="Furka Hybrid-Monitor", page_icon="🏔️")
+st.title("🏔️ Furka Live-Verkehrsfluss")
+
+# Wir betten eine Google Maps Karte ein, die auf Oberwald zentriert ist
+# Der 'layer=t' Parameter aktiviert die Verkehrsdaten (Traffic)
+st.markdown("### 🚗 Echtzeit-Stau-Check (Oberwald & Realp)")
+st.info("Ist die Strasse zum Verlad ROT? Dann gibt es Wartezeit.")
+
+# Koordinaten für Oberwald Verlad
+map_url = "https://www.google.com/maps/embed/v1/view?key=DEIN_GOOGLE_API_KEY&center=46.5333,8.3500&zoom=15&maptype=roadmap&layer=t"
+# Hinweis: Ohne API Key nutzen wir die Standard-Embed-Variante:
+st.components.v1.iframe(
+    "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d2724.444!2d8.348!3d46.533!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2zNDbase0zMicwMC4wIk4gOMKwMjAnNDguMCJF!5e0!3m2!1sde!2sch!4v1614000000000",
+    height=450
+)
 
 st.markdown("""
-    <style>
-    .report-box { background-color: #1e2130; padding: 20px; border-radius: 10px; border: 1px solid #30363d; }
-    .source-tag { font-size: 0.8em; color: #8b949e; }
-    </style>
-    """, unsafe_allow_html=True)
-
-def fetch_source(url, label):
-    """Generische Funktion zum Abrufen von Web-Inhalten."""
-    headers = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15"}
-    try:
-        response = requests.get(url, headers=headers, timeout=8)
-        return response.text if response.status_code == 200 else ""
-    except:
-        return ""
-
-def scan_for_furka():
-    # Quelle 1: TCS Verkehrsinfo
-    tcs_url = "https://www.tcs.ch/de/tools/verkehrsinfo-kontrollen/aktuelle-verkehrslage.php"
-    # Quelle 2: SRF Verkehrs-Feed
-    srf_url = "https://www.srf.ch/news/verkehrsinfo"
-    
-    tcs_html = fetch_source(tcs_url, "TCS")
-    srf_html = fetch_source(srf_url, "SRF")
-    
-    combined = tcs_html + srf_html
-    
-    # Suche nach 'Furka' und einer Zahl vor 'min'
-    # Wir suchen flexibel: 'Furka... 20 min' oder 'Wartezeit Furka... 15 min'
-    match = re.search(r'Furka.*?(\d+)\s*min', combined, re.S | re.I)
-    
-    if match:
-        return match.group(1), "TCS/SRF Live-Feed"
-    return "0", "Keine Meldungen"
-
-# --- UI ---
-st.title("🏔️ Furka Hybrid-Monitor")
-st.write(f"Kombinierte Abfrage (TCS & SRF) - {datetime.now().strftime('%H:%M:%S')} Uhr")
-
-if st.button("🔍 Alle Verkehrsquellen scannen"):
-    with st.spinner("Scanne TCS und SRF Datenbanken..."):
-        zeit, quelle = scan_for_furka()
-        
-        st.markdown(f"""
-        <div class="report-box">
-            <h3>Wartezeit Autoverlad</h3>
-            <h1 style="color: {'#ff4b4b' if int(zeit) > 0 else '#28a745'};">{zeit} Min.</h1>
-            <p class="source-tag">Quelle: {quelle}</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        if int(zeit) == 0:
-            st.success("✅ Beide Quellen melden derzeit keine nennenswerten Wartezeiten.")
-        else:
-            st.warning(f"⚠️ Achtung: Es wird eine Verzögerung von {zeit} Minuten gemeldet.")
-
-st.divider()
-st.info("Dieser Monitor nutzt Text-Analysen von TCS und SRF, um die JavaScript-Sperren der MGB zu umgehen.")
+    <a href="https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten" target="_blank" 
+       style="background-color: #ff4b4b; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
+       Zusätzlich offizielle MGB-Minuten prüfen
+    </a>
+""", unsafe_allow_html=True)
