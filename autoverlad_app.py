@@ -1,56 +1,58 @@
 import streamlit as st
-import requests
-import re
-from datetime import datetime
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+import time
 
-st.set_page_config(page_title="Furka Live-Check", page_icon="🏔️")
+st.set_page_config(page_title="Furka Realtime", page_icon="🏔️")
 
-st.title("🏔️ Furka Autoverlad Live-Status")
-st.markdown(f"**Letzte Prüfung:** {datetime.now().strftime('%H:%M:%S')} Uhr")
+st.title("🏔️ Furka Autoverlad Echtzeit-Check")
+st.info("Der Browser-Simulator startet... Bitte einen Moment Geduld.")
 
-def get_real_waiting_times():
-    # Wir rufen die Seite als "Rohdaten" ab, um JS-Blöcke zu finden
+def get_furka_times_live():
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")  # Kein Fenster öffnen
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    
+    driver = webdriver.Chrome(options=chrome_options)
     url = "https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten"
-    headers = {"User-Agent": "Mozilla/5.0"}
     
     try:
-        response = requests.get(url, headers=headers, timeout=10)
-        content = response.text
+        driver.get(url)
+        # Wir warten bis zu 15 Sekunden, bis das Element mit den Zeiten erscheint
+        # MGB nutzt oft Text-Elemente für die Anzeige
+        wait = WebDriverWait(driver, 15)
+        wait.until(EC.presence_of_element_located((By.TAG_BODY, "body")))
         
-        # Suche nach dem typischen JSON-Muster für Wartezeiten im Quelltext
-        # Wir suchen nach "Oberwald" oder "Realp" gefolgt von einer Zahl
-        times = {"Oberwald": "Unbekannt", "Realp": "Unbekannt"}
+        # Kurze Pause damit JS die Zahlen einsetzen kann
+        time.sleep(5)
         
-        for station in times.keys():
-            # Regex sucht nach Station + beliebigem Text + Zahl + "min"
-            match = re.search(fr'{station}.*?(\d+)\s*min', content, re.IGNORECASE | re.DOTALL)
-            if match:
-                times[station] = f"{match.group(1)} Min"
-        
-        return times
-    except:
-        return None
+        page_text = driver.page_source
+        driver.quit()
+        return page_text
+    except Exception as e:
+        driver.quit()
+        return str(e)
 
-# Daten abrufen
-data = get_real_waiting_times()
+# Button zum manuellen Starten
+if st.button("🔍 Live-Daten jetzt abrufen"):
+    raw_data = get_furka_times_live()
+    
+    # Wir filtern die Zahlen aus dem fertig gerenderten HTML
+    import re
+    oberwald = re.search(r'Oberwald.*?(\d+)\s*min', raw_data, re.IGNORECASE | re.DOTALL)
+    realp = re.search(r'Realp.*?(\d+)\s*min', raw_data, re.IGNORECASE | re.DOTALL)
+    
+    c1, c2 = st.columns(2)
+    with c1:
+        val = f"{oberwald.group(1)} Min" if oberwald else "Keine Wartezeit"
+        st.metric("Abfahrt Oberwald", val)
+    with c2:
+        val = f"{realp.group(1)} Min" if realp else "Keine Wartezeit"
+        st.metric("Abfahrt Realp", val)
 
-# Anzeige der Ergebnisse
-c1, c2 = st.columns(2)
-
-with c1:
-    val = data["Oberwald"] if data else "0 Min"
-    st.metric("Abfahrt Oberwald", val)
-    if "Unbekannt" in val or "0" in val:
-        st.success("✅ Keine Wartezeit")
-
-with c2:
-    val = data["Realp"] if data else "0 Min"
-    st.metric("Abfahrt Realp", val)
-    if "Unbekannt" in val or "0" in val:
-        st.success("✅ Keine Wartezeit")
-
-# --- NOTFALL-ANZEIGE ---
 st.divider()
-st.subheader("🔗 Direkter Link")
-st.info("Falls die Automatik oben keine Daten findet, liegt es an der neuen JavaScript-Sicherung der MGB.")
-st.link_button("Offizielle Wartezeiten auf MGB.ch prüfen", "https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten")
+st.caption("Datenquelle: Direkt-Scan der MGB-Webseite via Selenium.")
