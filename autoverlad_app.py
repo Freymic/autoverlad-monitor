@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
 # --- CONFIG ---
-st.set_page_config(page_title="Autoverlad Live (ASTRA SOAP)", layout="wide", page_icon="🏔️")
+st.set_page_config(page_title="Autoverlad Live (Official API)", layout="wide", page_icon="🏔️")
 st_autorefresh(interval=600000, key="api_refresh_timer")
 DB_FILE = "wartezeiten_historie.csv"
 
@@ -32,31 +32,55 @@ def text_zu_minuten(text):
             return mins
     return 0
 
-def fetch_astra_soap():
+def fetch_astra_data():
     daten = {"Realp": 0, "Oberwald": 0, "Kandersteg": 0, "Goppenstein": 0}
     url = "https://api.opentransportdata.swiss/TDP/Soap_Datex2/TrafficSituations/Pull"
     
-    # Der SOAP-Umschlag (Envelope), den die API erwartet
-    soap_body = """<v2:pullSituationsRequest xmlns:v2="http://datex2.eu/schema/2/2_0"/>"""
+    # Exakter Body aus dem Kochbuch
+    soap_body = """<?xml version="1.0" encoding="utf-8"?>
+    <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+      <soap:Body>
+        <d2LogicalModel xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" modelBaseVersion="2" xmlns="http://datex2.eu/schema/2/2_0">
+          <exchange>
+            <supplierIdentification>
+              <country>ch</country>
+              <nationalIdentifier>FEDRO</nationalIdentifier>
+            </supplierIdentification>
+            <subscription>
+              <operatingMode>operatingMode1</operatingMode>
+              <subscriptionStartTime>2024-01-01T00:00:00Z</subscriptionStartTime>
+              <subscriptionState>active</subscriptionState>
+              <updateMethod>singleElementUpdate</updateMethod>
+              <target>
+                <address></address>
+                <protocol>http</protocol>
+              </target>
+            </subscription>
+          </exchange>
+        </d2LogicalModel>
+      </soap:Body>
+    </soap:Envelope>"""
     
     headers = {
         "Authorization": f"Bearer {API_TOKEN}",
         "Content-Type": "text/xml; charset=utf-8",
-        "User-Agent": "StreamlitAutoverlad/1.0"
+        # Exakte SoapAction laut Kochbuch
+        "SOAPAction": "http://opentransportdata.swiss/TDP/Soap_Datex2/Pull/v1/pullTrafficMessages"
     }
     
     try:
-        # Wir senden einen POST-Request statt GET, da es SOAP ist
-        response = requests.post(url, data=soap_body, headers=headers, timeout=30)
+        response = requests.post(url, data=soap_body.encode('utf-8'), headers=headers, timeout=45)
         
         if response.status_code == 200:
             soup = BeautifulSoup(response.content, "xml")
-            records = soup.find_all("situationRecord")
+            # In Datex-II können die Records namespaces haben (z.B. dx223:situationRecord)
+            records = soup.find_all(lambda tag: "situationRecord" in tag.name)
             
             for record in records:
-                desc_tag = record.find("description")
-                if desc_tag:
-                    txt = desc_tag.get_text().lower()
+                # Suche nach dem Beschreibungsfeld (comment oder value)
+                desc = record.find(lambda tag: "value" in tag.name or "comment" in tag.name)
+                if desc:
+                    txt = desc.get_text().lower()
                     val = text_zu_minuten(txt)
                     
                     if "realp" in txt: daten["Realp"] = max(daten["Realp"], val)
@@ -64,31 +88,29 @@ def fetch_astra_soap():
                     if "kandersteg" in txt: daten["Kandersteg"] = max(daten["Kandersteg"], val)
                     if "goppenstein" in txt: daten["Goppenstein"] = max(daten["Goppenstein"], val)
         else:
-            st.sidebar.error(f"SOAP Fehler: {response.status_code}")
+            st.sidebar.error(f"Fehler: {response.status_code}")
     except Exception as e:
         st.sidebar.error(f"Verbindungsfehler: {e}")
     return daten
 
-# --- MAIN ---
-aktuelle_werte = fetch_astra_soap()
-zeitpunkt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+# --- UI & LOGIK ---
+werte = fetch_astra_data()
+ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 # Speichern
-pd.DataFrame([{"Zeit": zeitpunkt, **aktuelle_werte}]).to_csv(
+pd.DataFrame([{"Zeit": ts, **werte}]).to_csv(
     DB_FILE, mode='a', header=not os.path.exists(DB_FILE), index=False
 )
 
-st.title("🏔️ Autoverlad Live-Monitor (Pro)")
-st.caption("Datenquelle: ASTRA via opentransportdata.swiss (SOAP Pull)")
+st.title("🏔️ Autoverlad Live-Monitor (Official)")
+st.caption("Datenquelle: ASTRA via opentransportdata.swiss (SOAP API)")
 
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Realp", f"{aktuelle_werte['Realp']} Min")
-c2.metric("Oberwald", f"{aktuelle_werte['Oberwald']} Min")
-c3.metric("Kandersteg", f"{aktuelle_werte['Kandersteg']} Min")
-c4.metric("Goppenstein", f"{aktuelle_werte['Goppenstein']} Min")
+c1.metric("Realp", f"{werte['Realp']} Min")
+c2.metric("Oberwald", f"{werte['Oberwald']} Min")
+c3.metric("Kandersteg", f"{werte['Kandersteg']} Min")
+c4.metric("Goppenstein", f"{werte['Goppenstein']} Min")
 
-# Verlauf
-st.divider()
 if os.path.exists(DB_FILE):
     df = pd.read_csv(DB_FILE).drop_duplicates().sort_values('Zeit')
     df['Zeit'] = pd.to_datetime(df['Zeit'])
