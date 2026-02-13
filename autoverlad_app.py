@@ -8,53 +8,55 @@ import altair as alt
 import re
 from streamlit_autorefresh import st_autorefresh
 
+# --- 1. SETUP ---
 st_autorefresh(interval=900000, key="autoverlad_check")
 DB_FILE = "wartezeiten_historie.csv"
 
 def fetch_wartezeiten():
     daten = {"Realp": 0, "Oberwald": 0, "Kandersteg": 0, "Goppenstein": 0}
-    debug_info = {}
+    raw_text_debug = ""
     
     try:
         # --- FURKA (MGB) ---
         r_f = requests.get("https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten", timeout=15)
-        # Wir holen den Text und löschen überflüssige Leerzeichen/Umbrüche
-        text_f = " ".join(BeautifulSoup(r_f.content, 'html.parser').get_text(separator=' ').split())
-        debug_info['Furka_Raw'] = text_f[:1000] # Die ersten 1000 Zeichen für die Sidebar
+        soup_f = BeautifulSoup(r_f.content, 'html.parser')
+        text_f = " ".join(soup_f.get_text(separator=' ').split())
+        raw_text_debug = text_f[:1500]
         
         for station in ["Realp", "Oberwald"]:
-            # Suche nach dem Stationsnamen und nimm 300 Zeichen davor und danach
-            match = re.search(f"(.{{0,300}}{station}.{{0,300}})", text_f, re.IGNORECASE)
+            # Suche im Umkreis von 500 Zeichen
+            match = re.search(f"(.{{0,500}}{station}.{{0,500}})", text_f, re.IGNORECASE)
             if match:
                 kontext = match.group(1)
-                # Wir suchen nach Zahlen, die vor 'Min' oder 'Std' stehen
                 zahlen = re.findall(r'(\d+)\s*(?:Min|min|Minuten|h|Std)', kontext)
                 if zahlen:
                     daten[station] = int(zahlen[0])
-                debug_info[f'Kontext_{station}'] = kontext
+                # Spezialfall: Wenn 'Wartezeit' vorkommt aber keine Zahl direkt dabei steht
+                elif "Wartezeit" in kontext and any(x in kontext for x in ["30", "60", "90"]):
+                    find_val = re.findall(r'(30|60|90|120)', kontext)
+                    if find_val: daten[station] = int(find_val[0])
 
         # --- LÖTSCHBERG (BLS) ---
         r_l = requests.get("https://www.bls.ch/de/fahren/autoverlad/fahrplan", timeout=15)
         text_l = " ".join(BeautifulSoup(r_l.content, 'html.parser').get_text(separator=' ').split())
         
         for station in ["Kandersteg", "Goppenstein"]:
-            match = re.search(f"(.{{0,300}}{station}.{{0,300}})", text_l, re.IGNORECASE)
+            match = re.search(f"(.{{0,400}}{station}.{{0,400}})", text_l, re.IGNORECASE)
             if match:
                 kontext = match.group(1)
                 zahlen = re.findall(r'(\d+)\s*(?:Min|min|h|Std)', kontext)
-                if zahlen:
-                    daten[station] = int(zahlen[0])
+                if zahlen: daten[station] = int(zahlen[0])
 
     except Exception as e:
-        st.error(f"Fehler beim Scraping: {e}")
+        st.sidebar.error(f"Scraping Fehler: {e}")
         
-    return daten, debug_info
+    return daten, raw_text_debug
 
-# --- UI ---
+# --- 2. LOGIK ---
 st.set_page_config(page_title="Autoverlad Monitor", layout="wide")
-aktuelle_werte, debug_data = fetch_wartezeiten()
+aktuelle_werte, raw_debug = fetch_wartezeiten()
 
-# Speichern
+# Speichern in CSV
 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 df_new = pd.DataFrame([{"Zeit": now, **aktuelle_werte}])
 if not os.path.isfile(DB_FILE):
@@ -62,15 +64,7 @@ if not os.path.isfile(DB_FILE):
 else:
     df_new.to_csv(DB_FILE, mode='a', header=False, index=False)
 
+# --- 3. UI ---
 st.title("🏔️ Autoverlad Live-Monitor")
 
-# Metriken
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("Realp", f"{aktuelle_werte['Realp']} Min")
-c2.metric("Oberwald", f"{aktuelle_werte['Oberwald']} Min")
-c3.metric("Kandersteg", f"{aktuelle_werte['Kandersteg']} Min")
-c4.metric("Goppenstein", f"{aktuelle_werte['Goppenstein']} Min")
-
-# --- DEBUG SIDEBAR ---
-with st.sidebar:
-    st.header("🔍 Debug-Modus
+c1, c2, c3, c4 =
