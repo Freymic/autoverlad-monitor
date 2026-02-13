@@ -1,52 +1,84 @@
 import streamlit as st
 import requests
 from bs4 import BeautifulSoup
-import pandas as pd
+import re
 from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
-st.set_page_config(page_title="Autoverlad Live-Monitor", layout="wide")
-st_autorefresh(interval=300000, key="refresh") # Alle 5 Min aktualisieren
+# --- KONFIGURATION ---
+st.set_page_config(page_title="Furka Autoverlad Live", page_icon="🏔️")
+st_autorefresh(interval=300000, key="furka_refresh") # Alle 5 Min
 
-def get_bls_wartezeit():
-    """Scrapt die BLS-Webseite für Kandersteg und Goppenstein."""
-    url = "https://www.bls.ch/de/fahren/autoverlad/fahrplan"
-    try:
-        res = requests.get(url, timeout=10)
-        soup = BeautifulSoup(res.text, "html.parser")
-        # Suche nach den Texten in den typischen BLS-Elementen
-        text = soup.get_text()
-        kandersteg = 30 if "30 Min" in text and "Kandersteg" in text else 0
-        goppenstein = 30 if "30 Min" in text and "Goppenstein" in text else 0
-        # Hinweis: Das ist eine vereinfachte Logik, die wir verfeinern können
-        return {"Kandersteg": kandersteg, "Goppenstein": goppenstein}
-    except:
-        return {"Kandersteg": "N/A", "Goppenstein": "N/A"}
+def extract_minutes(text):
+    """Sucht nach Mustern wie '30 Min', '1 Std', 'keine Wartezeit'."""
+    text = text.lower()
+    if "keine wartezeit" in text or "0 min" in text:
+        return 0
+    
+    # Suche nach 'X Std' und 'Y Min'
+    hours = re.search(r'(\d+)\s*std', text)
+    mins = re.search(r'(\d+)\s*min', text)
+    
+    total = 0
+    if hours: total += int(hours.group(1)) * 60
+    if mins: total += int(mins.group(1))
+    return total
 
-def get_furka_wartezeit():
-    """Scrapt die MGB-Webseite für Realp und Oberwald."""
+def get_furka_data():
+    """Liest die offizielle MGB-Webseite für Furka-Wartezeiten aus."""
     url = "https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten"
+    results = {"Oberwald": "Unbekannt", "Realp": "Unbekannt"}
+    
     try:
-        res = requests.get(url, timeout=10)
-        soup = BeautifulSoup(res.text, "html.parser")
-        text = soup.get_text()
-        realp = 30 if "30 Min" in text and "Realp" in text else 0
-        oberwald = 30 if "30 Min" in text and "Oberwald" in text else 0
-        return {"Realp": realp, "Oberwald": oberwald}
-    except:
-        return {"Realp": "N/A", "Oberwald": "N/A"}
+        # User-Agent simulieren, um nicht blockiert zu werden
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        res = requests.get(url, headers=headers, timeout=15)
+        
+        if res.status_code == 200:
+            soup = BeautifulSoup(res.text, "html.parser")
+            
+            # Wir suchen nach den spezifischen Textblöcken auf der Seite
+            # Die MGB nutzt oft Listen oder Tabellen für die Bahnhöfe
+            page_content = soup.get_text(separator=' ')
+            
+            # Suche nach Abschnitten, die den Bahnhofnamen enthalten
+            for station in results.keys():
+                # Wir suchen den Textbereich um den Stationsnamen herum (ca. 200 Zeichen danach)
+                pattern = f"{station}.*?(\d+\s*min|\d+\s*std|keine wartezeit)"
+                match = re.search(pattern, page_content, re.IGNORECASE | re.DOTALL)
+                
+                if match:
+                    results[station] = extract_minutes(match.group(0))
+                else:
+                    results[station] = 0 # Standardmäßig 0, wenn nichts gefunden
+        return results
+    except Exception as e:
+        return {"Oberwald": f"Fehler: {e}", "Realp": "Fehler"}
 
 # --- UI ---
-st.title("🏔️ Autoverlad Realtime Monitor")
-st.write("Datenquelle: Direkte Abfrage der Betreiber-Webseiten (BLS & MGB)")
+st.title("🏔️ Autoverlad Furka: Live-Status")
+st.subheader("Echtzeit-Abfrage der Matterhorn Gotthard Bahn")
 
-furka = get_furka_wartezeit()
-bls = get_bls_wartezeit()
+data = get_furka_data()
 
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("Realp", f"{furka['Realp']} Min")
-c2.metric("Oberwald", f"{furka['Oberwald']} Min")
-c3.metric("Kandersteg", f"{bls['Kandersteg']} Min")
-c4.metric("Goppenstein", f"{bls['Goppenstein']} Min")
+col1, col2 = st.columns(2)
 
-st.info("Hinweis: Da keine offizielle API existiert, liest diese App die Informationen direkt von den Webseiten der Bahnbetreiber aus.")
+with col1:
+    st.metric("Oberwald", f"{data['Oberwald']} Min")
+    if isinstance(data['Oberwald'], int) and data['Oberwald'] > 30:
+        st.warning("Erhöhtes Verkehrsaufkommen in Oberwald!")
+
+with col2:
+    st.metric("Realp", f"{data['Realp']} Min")
+    if isinstance(data['Realp'], int) and data['Realp'] > 30:
+        st.warning("Erhöhtes Verkehrsaufkommen in Realp!")
+
+st.divider()
+st.write(f"Zuletzt geprüft: {datetime.now().strftime('%H:%M:%S')} Uhr")
+st.caption("Diese App liest die Daten direkt von der Webseite der MGB aus, da keine öffentliche API für Wartezeiten existiert.")
+
+# DIAGNOSE-MODUS (Optional zum Testen)
+with st.expander("Rohdaten-Analyse (Webseite Text)"):
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    test_res = requests.get("https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten", headers=headers)
+    st.text(test_res.text[:1000]) # Zeige den Anfang des HTML-Codes
