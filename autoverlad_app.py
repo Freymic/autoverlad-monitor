@@ -18,7 +18,6 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 def get_live_data():
-    """Startet einen Headless-Browser und wartet auf die GraphQL-Antwort."""
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
@@ -31,11 +30,10 @@ def get_live_data():
         service = Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=options)
         
-        # Zugriff auf die MGB-Wartezeit-Seite
         url = "https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten"
         driver.get(url)
         
-        # WICHTIG: 15 Sek. Pause für das asynchrone Laden der Daten
+        # WICHTIG: 15 Sek. Pause für das asynchrone Laden der GraphQL-Daten
         time.sleep(15)
         
         html_source = driver.page_source
@@ -51,22 +49,20 @@ st.title("🏔️ Furka Autoverlad Live")
 st.write(f"Abfragezeit: {datetime.now().strftime('%H:%M:%S')} Uhr")
 
 if st.button("🔍 Live-Daten jetzt abrufen"):
-    with st.spinner("Browser-Simulator wird gestartet..."):
+    with st.spinner("Browser wird gestartet..."):
         content = get_live_data()
         
         if "Fehler" in content:
             st.error(f"Technisches Problem (Code 127): {content}")
-            st.info("💡 Stelle sicher, dass 'packages.txt' in GitHub hochgeladen wurde.")
+            st.info("💡 Lösung: Erstelle die Datei 'packages.txt' in deinem GitHub-Ordner.")
         else:
-            # Daten-Extraktion mittels Regex
+            # Daten-Extraktion
             o_match = re.search(r'Oberwald.*?(\d+)\s*min', content, re.S | re.I)
             r_match = re.search(r'Realp.*?(\d+)\s*min', content, re.S | re.I)
             
             c1, c2 = st.columns(2)
-            with c1:
-                st.metric("Abfahrt Oberwald", f"{o_match.group(1) if o_match else '0'} Min")
-            with c2:
-                st.metric("Abfahrt Realp", f"{r_match.group(1) if r_match else '0'} Min")
+            with c1: st.metric("Oberwald", f"{o_match.group(1) if o_match else '0'} Min")
+            with c2: st.metric("Realp", f"{r_match.group(1) if r_match else '0'} Min")
 
 st.divider()
 st.link_button("Zur offiziellen MGB-Webseite", "https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten")
