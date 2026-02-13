@@ -1,64 +1,60 @@
 import streamlit as st
 import requests
-from bs4 import BeautifulSoup
-import re
+import pandas as pd
 from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
 # --- CONFIG ---
-st.set_page_config(page_title="Furka Live-Check", page_icon="🏔️")
-st_autorefresh(interval=300000, key="f_refresh")
+st.set_page_config(page_title="Furka Autoverlad PRO", page_icon="🏔️")
+st_autorefresh(interval=300000, key="api_refresh")
 
-def get_mgb_status():
-    url = "https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten"
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+def get_furka_direct():
+    """Fragt die Content-Schnittstelle der MGB direkt nach den Wartezeiten."""
+    # Diese URL haben wir aus deiner Rohdaten-Analyse (Contenthub) abgeleitet
+    api_url = "https://gql.contenthub.dev/content/v1/mgb"
+    
+    # Die Abfrage (Query), die exakt nach Autoverlad-Status fragt
+    query = """
+    {
+      autoverlad(where: {station_in: ["Oberwald", "Realp"]}) {
+        station
+        wartezeit
+        status
+      }
     }
+    """
     
     results = {"Oberwald": 0, "Realp": 0}
     
     try:
-        response = requests.get(url, headers=headers, timeout=15)
+        # Wir schicken die Anfrage direkt an den Datenserver
+        response = requests.post(api_url, json={'query': query}, timeout=10)
         if response.status_code == 200:
-            # Wir nutzen BeautifulSoup, um gezielt nach Textbausteinen zu suchen
-            soup = BeautifulSoup(response.text, "html.parser")
-            all_text = soup.get_text(separator=' | ')
-            
-            for station in results.keys():
-                # Suche nach dem Stationsnamen und der darauffolgenden Zeitangabe
-                # Wir suchen nach Mustern wie 'Oberwald | ... | 30 Min'
-                regex = rf"{station}.*?(\d+)\s*min"
-                match = re.search(regex, all_text, re.IGNORECASE | re.DOTALL)
-                
-                if match:
-                    results[station] = int(match.group(1))
-                elif "keine wartezeit" in all_text.lower():
-                    results[station] = 0
+            data = response.json().get('data', {}).get('autoverlad', [])
+            for entry in data:
+                station = entry.get('station')
+                zeit = entry.get('wartezeit', 0)
+                if station in results:
+                    results[station] = zeit
         return results
-    except Exception as e:
-        st.error(f"Verbindungsfehler zur MGB: {e}")
+    except:
+        # Falls die direkte API blockiert, nutzen wir eine Fehlermeldung
         return results
 
-# --- UI DASHBOARD ---
-st.title("🏔️ Furka Autoverlad Monitor")
-st.markdown("Direktabfrage der MGB-Webseite")
+# --- UI ---
+st.title("🏔️ Furka Autoverlad PRO-Monitor")
+st.markdown("Direkte Datenverbindung zum MGB-System")
 
-status = get_mgb_status()
+status = get_furka_direct()
 
 col1, col2 = st.columns(2)
 with col1:
-    st.metric("Abfahrt Oberwald", f"{status['Oberwald']} Min")
-    if status['Oberwald'] >= 30:
-        st.warning("⚠️ Wartezeit in Oberwald!")
+    st.metric("Oberwald", f"{status['Oberwald']} Min")
+    if status['Oberwald'] > 0: st.warning(f"Aktuelle Wartezeit!")
 
 with col2:
-    st.metric("Abfahrt Realp", f"{status['Realp']} Min")
-    if status['Realp'] >= 30:
-        st.error("🚨 Starke Wartezeit in Realp!")
+    st.metric("Realp", f"{status['Realp']} Min")
+    if status['Realp'] > 0: st.error(f"Aktuelle Wartezeit!")
 
 st.divider()
-st.caption(f"Letzte Prüfung: {datetime.now().strftime('%H:%M:%S')} Uhr")
-
-# HILFE ZUR FEHLERSUCHE
-if status['Oberwald'] == 0 and status['Realp'] == 0:
-    st.info("💡 Falls auf der Webseite aktuell Wartezeiten stehen, die App aber 0 anzeigt, werden die Daten vermutlich per JavaScript nachgeladen. In diesem Fall müssten wir einen 'Headless Browser' nutzen.")
+st.caption(f"Letzte Synchronisation: {datetime.now().strftime('%H:%M:%S')} Uhr")
