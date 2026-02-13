@@ -6,3 +6,4 @@ pandas
 altair
 lxml
 selenium
+webdriver-manager
