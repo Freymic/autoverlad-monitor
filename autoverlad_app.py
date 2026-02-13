@@ -13,55 +13,55 @@ st_autorefresh(interval=900000, key="autoverlad_check")
 DB_FILE = "wartezeiten_historie.csv"
 
 def parse_time_string(text):
-    """Rechnet '1 Stunde 30 Minuten' präzise in 90 Minuten um."""
+    """Extrahiert Stunden und Minuten und rechnet sie in Minuten um."""
     total_minutes = 0
-    found_time = False
+    found = False
     
-    # 1. Suche nach Stunden (Stunde/h/Std)
+    # Suche nach '1 Stunde' oder '2 Stunden'
     hr_match = re.search(r'(\d+)\s*(?:Stunde|h|Std)', text, re.IGNORECASE)
     if hr_match:
         total_minutes += int(hr_match.group(1)) * 60
-        found_time = True
+        found = True
         
-    # 2. Suche nach Minuten (Minute/min/Min)
+    # Suche nach '30 Minuten'
     min_match = re.search(r'(\d+)\s*(?:Minute|min|Min)', text, re.IGNORECASE)
     if min_match:
         total_minutes += int(min_match.group(1))
-        found_time = True
-    
-    # 3. Nur wenn absolut keine Zeitwörter gefunden wurden, nimm die erste Zahl
-    # Aber ignoriere Zahlen, die Teil eines Datums/Uhrzeit sein könnten (z.B. 2026, 18:07)
-    if not found_time:
-        all_numbers = re.findall(r'\b(\d{1,3})\b', text)
-        for num in all_numbers:
-            val = int(num)
-            if 5 <= val <= 240: # Nur plausible Wartezeiten
-                return val
+        found = True
             
-    return total_minutes
+    return total_minutes if found else 0
 
 def fetch_wartezeiten():
     daten = {"Realp": 0, "Oberwald": 0, "Kandersteg": 0, "Goppenstein": 0}
     try:
-        # FURKA (MGB)
+        # --- FURKA (MGB) ---
         r_f = requests.get("https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten", timeout=15)
         soup_f = BeautifulSoup(r_f.content, 'html.parser')
-        # Wir entfernen das Datum/Zeit-Element am Ende der Seite, um Fehlinterpretationen zu vermeiden
-        for footer in soup_f.find_all(['footer', 'span']):
-            if "aktualisiert" in footer.text: footer.decompose()
         
-        text_f = " ".join(soup_f.get_text(separator=' ').split())
-        
+        # Gezielte Suche: Wir nehmen nur den Text unter der Überschrift 'Verkehrsinformation'
+        verkehrs_info_text = ""
+        # Wir suchen nach dem h2-Tag 'Verkehrsinformation' oder einem Container, der diesen Text enthält
+        container = soup_f.find(lambda tag: tag.name == "h2" and "Verkehrsinformation" in tag.text)
+        if container:
+            # Wir nehmen den Text des übergeordneten Bereichs, um alle Meldungen zu erfassen
+            verkehrs_info_text = container.parent.get_text(separator=' ')
+        else:
+            # Fallback: Falls h2 nicht gefunden wird, suche großflächig nach dem Wort
+            text_full = soup_f.get_text(separator=' ')
+            if "Verkehrsinformation" in text_full:
+                verkehrs_info_text = text_full.split("Verkehrsinformation")[-1].split("zuletzt aktualisiert")[0]
+
+        # Analyse für Realp und Oberwald innerhalb der 'Verkehrsinformation'
         for station in ["Realp", "Oberwald"]:
-            match = re.search(f"({station}.{{0,500}})", text_f, re.IGNORECASE)
+            match = re.search(f"({station}.{{0,300}})", verkehrs_info_text, re.IGNORECASE)
             if match:
                 kontext = match.group(1)
-                if "keine Wartezeit" in kontext.lower():
+                if "keine wartezeit" in kontext.lower():
                     daten[station] = 0
                 else:
                     daten[station] = parse_time_string(kontext)
 
-        # LÖTSCHBERG (BLS)
+        # --- LÖTSCHBERG (BLS) ---
         r_l = requests.get("https://www.bls.ch/de/fahren/autoverlad/fahrplan", timeout=15)
         text_l = " ".join(BeautifulSoup(r_l.content, 'html.parser').get_text(separator=' ').split())
         for station in ["Kandersteg", "Goppenstein"]:
@@ -73,10 +73,10 @@ def fetch_wartezeiten():
     return daten
 
 # --- 2. LOGIK ---
-st.set_page_config(page_title="Autoverlad Monitor", layout="wide")
+st.set_page_config(page_title="Autoverlad Monitor", layout="wide", page_icon="🏔️")
 aktuelle_werte = fetch_wartezeiten()
 
-# Speichern
+# Daten in CSV speichern
 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 df_new = pd.DataFrame([{"Zeit": now, **aktuelle_werte}])
 if not os.path.isfile(DB_FILE):
@@ -85,11 +85,14 @@ else:
     df_new.to_csv(DB_FILE, mode='a', header=False, index=False)
 
 # --- 3. UI ---
-st.title("🏔️ Autoverlad Monitor")
+st.title("🏔️ Autoverlad Live-Monitor")
+st.write("Abfrage der offiziellen Verkehrsinformationen.")
 
-cols = st.columns(4)
-for i, (name, val) in enumerate(aktuelle_werte.items()):
-    cols[i].metric(name, f"{val} Min")
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("Realp", f"{aktuelle_werte['Realp']} Min")
+c2.metric("Oberwald", f"{aktuelle_werte['Oberwald']} Min")
+c3.metric("Kandersteg", f"{aktuelle_werte['Kandersteg']} Min")
+c4.metric("Goppenstein", f"{aktuelle_werte['Goppenstein']} Min")
 
 # --- 4. DIAGRAMM ---
 st.divider()
@@ -102,14 +105,14 @@ if os.path.isfile(DB_FILE):
         df_plot = df_hist[df_hist['Zeit'] > (datetime.now() - timedelta(hours=6))]
         
         if len(df_plot) > 1:
-            df_melted = df_plot.melt('Zeit', var_name='Station', value_name='Wartezeit')
+            df_melted = df_plot.melt('Zeit', var_name='Ort', value_name='Wartezeit')
             chart = alt.Chart(df_melted).mark_line(point=True).encode(
                 x=alt.X('Zeit:T', title='Uhrzeit', axis=alt.Axis(format='%H:%M')),
-                y=alt.Y('Wartezeit:Q', title='Minuten', scale=alt.Scale(domain=[0, 180])),
-                color='Station:N'
+                y=alt.Y('Wartezeit:Q', title='Minuten Wartezeit', scale=alt.Scale(domain=[0, 150])),
+                color=alt.Color('Ort:N', title='Station')
             ).properties(height=400).interactive()
             st.altair_chart(chart, use_container_width=True)
-    except:
-        st.error("Fehler beim Laden der Daten.")
+    except Exception as e:
+        st.error(f"Fehler beim Diagramm: {e}")
 
-st.caption(f"Letztes Update: {datetime.now().strftime('%H:%M:%S')}")
+st.caption(f"Letzte Aktualisierung: {datetime.now().strftime('%H:%M:%S')} Uhr")
