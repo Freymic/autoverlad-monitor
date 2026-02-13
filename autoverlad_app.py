@@ -7,63 +7,59 @@ import os
 from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
-# --- SETUP ---
-st.set_page_config(page_title="Autoverlad Monitor", layout="wide", page_icon="🏔️")
-st_autorefresh(interval=600000, key="auto_refresh_job")
+# --- BASIS-EINSTELLUNGEN ---
+st.set_page_config(page_title="Autoverlad Monitor", layout="wide")
+st_autorefresh(interval=600000, key="freshener")
 DB_FILE = "wartezeiten_historie.csv"
 
-def parse_time(text):
-    """Rechnet '1 Stunde 30 Minuten' in 90 Minuten um."""
-    mins = 0
+def get_minutes(text):
+    """Wandelt Zeitangaben sicher in Minuten um."""
+    total = 0
     hr = re.search(r'(\d+)\s*(?:Stunde|h|Std)', text, re.IGNORECASE)
-    if hr: mins += int(hr.group(1)) * 60
+    if hr: total += int(hr.group(1)) * 60
     mn = re.search(r'(\d+)\s*(?:Minute|min|Min)', text, re.IGNORECASE)
-    if mn: mins += int(mn.group(1))
-    return mins
+    if mn: total += int(mn.group(1))
+    return total
 
 def fetch_data():
-    daten = {"Realp": 0, "Oberwald": 0, "Kandersteg": 0, "Goppenstein": 0}
+    results = {"Realp": 0, "Oberwald": 0, "Kandersteg": 0, "Goppenstein": 0}
     try:
-        # --- FURKA (MGB) ---
+        # FURKA (MGB) - Wir suchen nur im Text zwischen 'Verkehrsinformation' und 'aktualisiert'
         r = requests.get("https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten", timeout=15)
-        soup = BeautifulSoup(r.content, 'html.parser')
-        text = soup.get_text(separator=' ')
+        raw_text = BeautifulSoup(r.content, 'html.parser').get_text(separator=' ')
         
-        # Wir isolieren den Bereich 'Verkehrsinformation' bis 'aktualisiert'
-        if "Verkehrsinformation" in text:
-            text = text.split("Verkehrsinformation")[-1]
-        if "aktualisiert" in text:
-            text = text.split("aktualisiert")[0]
-
+        # Sicherheits-Schnitt: Alles nach 'aktualisiert' wird gelöscht, um Uhrzeit-Fehler zu vermeiden
+        clean_text = raw_text.split("Verkehrsinformation")[-1].split("zuletzt aktualisiert")[0]
+        
         for loc in ["Realp", "Oberwald"]:
-            match = re.search(f"{loc}.{{0,200}}", text, re.IGNORECASE)
+            match = re.search(f"{loc}.{{0,250}}", clean_text, re.IGNORECASE)
             if match:
                 snippet = match.group(0)
                 if "keine" not in snippet.lower():
-                    daten[loc] = parse_time(snippet)
+                    results[loc] = get_minutes(snippet)
 
-        # --- LÖTSCHBERG (BLS) ---
+        # LÖTSCHBERG (BLS)
         rl = requests.get("https://www.bls.ch/de/fahren/autoverlad/fahrplan", timeout=15)
-        text_l = BeautifulSoup(rl.content, 'html.parser').get_text(separator=' ')
+        bls_text = BeautifulSoup(rl.content, 'html.parser').get_text(separator=' ')
         for loc in ["Kandersteg", "Goppenstein"]:
-            match = re.search(f"{loc}.{{0,250}}", text_l, re.IGNORECASE)
-            if match: daten[loc] = parse_time(match.group(0))
+            match = re.search(f"{loc}.{{0,250}}", bls_text, re.IGNORECASE)
+            if match: results[loc] = get_minutes(match.group(0))
     except:
         pass
-    return daten
+    return results
 
-# --- HAUPTLOGIK ---
+# --- HAUPTPROGRAMM ---
 aktuelle_werte = fetch_data()
 ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-# Speichern für das Diagramm
+# Speichern für Statistik
 df_new = pd.DataFrame([{"Zeit": ts, **aktuelle_werte}])
 if not os.path.exists(DB_FILE):
     df_new.to_csv(DB_FILE, index=False)
 else:
     df_new.to_csv(DB_FILE, mode='a', header=False, index=False)
 
-# --- UI ANZEIGE ---
+# --- UI ---
 st.title("🏔️ Autoverlad Live-Monitor")
 cols = st.columns(4)
 for i, (name, val) in enumerate(aktuelle_werte.items()):
@@ -71,22 +67,21 @@ for i, (name, val) in enumerate(aktuelle_werte.items()):
 
 # --- DIAGRAMM ---
 st.divider()
-if st.sidebar.button("🗑️ Verlauf zurücksetzen"):
+if st.sidebar.button("🗑️ Verlauf löschen"):
     if os.path.exists(DB_FILE): os.remove(DB_FILE)
     st.rerun()
 
 if os.path.exists(DB_FILE):
     try:
-        df = pd.read_csv(DB_FILE).drop_duplicates().sort_values('Zeit')
+        df = pd.read_csv(DB_FILE).drop_duplicates()
         df['Zeit'] = pd.to_datetime(df['Zeit'])
-        # Nur letzte 6h anzeigen
-        df = df[df['Zeit'] > (datetime.now() - timedelta(hours=6))]
+        df = df[df['Zeit'] > (datetime.now() - timedelta(hours=6))].sort_values('Zeit')
         
         if len(df) > 1:
             st.subheader("📈 Verlauf (letzte 6 Stunden)")
-            df_plot = df.melt('Zeit', var_name='Station', value_name='Minuten')
+            # Einfaches Streamlit-Diagramm statt kompliziertem Altair (vermeidet NameError)
             st.line_chart(df.set_index('Zeit'))
     except:
-        st.info("Sammle erste Datenpunkte...")
+        st.info("Sammle Daten...")
 
-st.caption(f"Letzte Messung: {datetime.now().strftime('%H:%M:%S')} Uhr")
+st.caption(f"Stand: {datetime.now().strftime('%H:%M:%S')} Uhr")
