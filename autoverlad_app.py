@@ -7,83 +7,69 @@ import os
 from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
-# --- KONFIGURATION ---
-st.set_page_config(page_title="Autoverlad Live", layout="wide", page_icon="🏔️")
+# --- SETUP ---
+st.set_page_config(page_title="Autoverlad Monitor", layout="wide", page_icon="🏔️")
 st_autorefresh(interval=600000, key="auto_refresh_job")
 DB_FILE = "wartezeiten_historie.csv"
 
-def get_minutes(text):
+def parse_time(text):
     """Rechnet '1 Stunde 30 Minuten' in 90 Minuten um."""
-    total = 0
+    mins = 0
     hr = re.search(r'(\d+)\s*(?:Stunde|h|Std)', text, re.IGNORECASE)
-    if hr: total += int(hr.group(1)) * 60
+    if hr: mins += int(hr.group(1)) * 60
     mn = re.search(r'(\d+)\s*(?:Minute|min|Min)', text, re.IGNORECASE)
-    if mn: total += int(mn.group(1))
-    return total
+    if mn: mins += int(mn.group(1))
+    return mins
 
-def fetch_mgb():
-    """Holt Daten speziell aus dem Bereich Verkehrsinformation."""
-    res = {"Realp": 0, "Oberwald": 0}
+def fetch_data():
+    daten = {"Realp": 0, "Oberwald": 0, "Kandersteg": 0, "Goppenstein": 0}
     try:
+        # --- FURKA (MGB) ---
         r = requests.get("https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten", timeout=15)
         soup = BeautifulSoup(r.content, 'html.parser')
+        text = soup.get_text(separator=' ')
         
-        # Wir suchen alle Info-Boxen auf der Seite
-        info_boxes = soup.find_all(text=re.compile(r'Verladestation|Wartezeit', re.IGNORECASE))
-        
-        # Wir fügen den Text aller relevanten Boxen zusammen, aber stoppen vor dem Footer
-        relevant_text = ""
-        for box in info_boxes:
-            parent_text = box.parent.get_text()
-            if "aktualisiert" not in parent_text: # Footer ignorieren
-                relevant_text += " " + parent_text
+        # Wir isolieren den Bereich 'Verkehrsinformation' bis 'aktualisiert'
+        if "Verkehrsinformation" in text:
+            text = text.split("Verkehrsinformation")[-1]
+        if "aktualisiert" in text:
+            text = text.split("aktualisiert")[0]
 
         for loc in ["Realp", "Oberwald"]:
-            # Suche im Umkreis der Station nach Zeitangaben
-            match = re.search(f"{loc}.{{0,200}}", relevant_text, re.IGNORECASE)
+            match = re.search(f"{loc}.{{0,200}}", text, re.IGNORECASE)
             if match:
                 snippet = match.group(0)
                 if "keine" not in snippet.lower():
-                    res[loc] = get_minutes(snippet)
-    except:
-        pass
-    return res
+                    daten[loc] = parse_time(snippet)
 
-def fetch_bls():
-    """Holt Daten vom Lötschberg."""
-    res = {"Kandersteg": 0, "Goppenstein": 0}
-    try:
-        r = requests.get("https://www.bls.ch/de/fahren/autoverlad/fahrplan", timeout=15)
-        text = BeautifulSoup(r.content, 'html.parser').get_text(separator=' ')
+        # --- LÖTSCHBERG (BLS) ---
+        rl = requests.get("https://www.bls.ch/de/fahren/autoverlad/fahrplan", timeout=15)
+        text_l = BeautifulSoup(rl.content, 'html.parser').get_text(separator=' ')
         for loc in ["Kandersteg", "Goppenstein"]:
-            match = re.search(f"{loc}.{{0,250}}", text, re.IGNORECASE)
-            if match: res[loc] = get_minutes(match.group(0))
+            match = re.search(f"{loc}.{{0,250}}", text_l, re.IGNORECASE)
+            if match: daten[loc] = parse_time(match.group(0))
     except:
         pass
-    return res
+    return daten
 
-# --- LOGIK ---
-mgb, bls = fetch_mgb(), fetch_bls()
-current = {**mgb, **bls}
-
-# Speichern
+# --- HAUPTLOGIK ---
+aktuelle_werte = fetch_data()
 ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-df_new = pd.DataFrame([{"Zeit": ts, "Station": k, "Wartezeit": v} for k, v in current.items()])
 
+# Speichern für das Diagramm
+df_new = pd.DataFrame([{"Zeit": ts, **aktuelle_werte}])
 if not os.path.exists(DB_FILE):
     df_new.to_csv(DB_FILE, index=False)
 else:
     df_new.to_csv(DB_FILE, mode='a', header=False, index=False)
 
-# --- UI ---
+# --- UI ANZEIGE ---
 st.title("🏔️ Autoverlad Live-Monitor")
-st.subheader("Aktuelle Wartezeiten (Verkehrsinformation)")
-
 cols = st.columns(4)
-for i, (name, val) in enumerate(current.items()):
+for i, (name, val) in enumerate(aktuelle_werte.items()):
     cols[i].metric(name, f"{val} Min")
 
-# --- CHART ---
+# --- DIAGRAMM ---
 st.divider()
 if st.sidebar.button("🗑️ Verlauf zurücksetzen"):
     if os.path.exists(DB_FILE): os.remove(DB_FILE)
@@ -91,14 +77,16 @@ if st.sidebar.button("🗑️ Verlauf zurücksetzen"):
 
 if os.path.exists(DB_FILE):
     try:
-        df = pd.read_csv(DB_FILE)
+        df = pd.read_csv(DB_FILE).drop_duplicates().sort_values('Zeit')
         df['Zeit'] = pd.to_datetime(df['Zeit'])
-        # Nur letzte 6h
+        # Nur letzte 6h anzeigen
         df = df[df['Zeit'] > (datetime.now() - timedelta(hours=6))]
         
-        if not df.empty:
-            st.line_chart(df.pivot(index='Zeit', columns='Station', values='Wartezeit'))
+        if len(df) > 1:
+            st.subheader("📈 Verlauf (letzte 6 Stunden)")
+            df_plot = df.melt('Zeit', var_name='Station', value_name='Minuten')
+            st.line_chart(df.set_index('Zeit'))
     except:
-        st.info("Sammle erste Daten...")
+        st.info("Sammle erste Datenpunkte...")
 
 st.caption(f"Letzte Messung: {datetime.now().strftime('%H:%M:%S')} Uhr")
