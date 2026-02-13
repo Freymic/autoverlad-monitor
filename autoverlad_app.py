@@ -7,77 +7,61 @@ import re
 import time
 from datetime import datetime
 
-# --- SETUP & STYLING ---
-st.set_page_config(page_title="Furka Live-Monitor", layout="centered", page_icon="🏔️")
+# --- SETUP ---
+st.set_page_config(page_title="Furka Live", page_icon="🏔️")
 
-# KORREKTUR: Der Parameter heißt 'unsafe_allow_html', nicht 'unsafe_allow_name_with_html'
+# KORREKTUR: 'unsafe_allow_html' statt des fehlerhaften Namens
 st.markdown("""
     <style>
-    .stMetric { background-color: #1e2130; padding: 15px; border-radius: 10px; border: 1px solid #30363d; }
+    .stMetric { background-color: #1e2130; padding: 15px; border-radius: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
 def get_live_data():
-    """Simuliert einen mobilen Browser mit erweiterten Timeouts."""
-    chrome_options = Options()
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    # Tarnung als iPhone, um GraphQL-Blockaden zu minimieren
-    chrome_options.add_argument("--user-agent=Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Mobile/15E148 Safari/604.1")
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    # iPhone-Tarnung gegen GraphQL-Blockaden
+    options.add_argument("--user-agent=Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Mobile/15E148 Safari/604.1")
 
     driver = None
     try:
+        # WebDriver-Manager installiert den passenden Treiber automatisch
         service = Service(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service, options=chrome_options)
+        driver = webdriver.Chrome(service=service, options=options)
         
-        # Erhöhtes Timeout für den Seitenaufbau
-        driver.set_page_load_timeout(30)
         url = "https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten"
         driver.get(url)
         
-        # WICHTIG: Wir warten länger, um die 'Zeitüberschreitung' zu vermeiden
-        # Die MGB-Daten brauchen oft 15+ Sekunden im Cloud-Netzwerk
-        time.sleep(18)
+        # WICHTIG: 15 Sek. warten, damit die GraphQL-Daten laden
+        time.sleep(15)
         
-        html_content = driver.page_source
-        return html_content
+        html = driver.page_source
+        return html
     except Exception as e:
         return f"Fehler: {str(e)}"
     finally:
-        if driver:
-            driver.quit()
+        if driver: driver.quit()
 
-# --- HAUPTSEITE ---
 st.title("🏔️ Furka Autoverlad Live")
-st.markdown(f"**Stand:** {datetime.now().strftime('%H:%M:%S')} Uhr")
+st.write(f"Abfragezeitpunkt: {datetime.now().strftime('%H:%M:%S')} Uhr")
 
-if st.button("🔍 Echtzeit-Daten jetzt abrufen"):
-    with st.spinner("Verbindung zum MGB-Server wird aufgebaut..."):
-        raw_html = get_live_data()
+if st.button("🔍 Jetzt Live-Daten prüfen"):
+    with st.spinner("MGB-Server wird abgefragt..."):
+        content = get_live_data()
         
-        if "Fehler" in raw_html:
-            st.error(f"Technisches Problem: {raw_html}")
-            st.info("Tipp: Ein 'Reboot' in Streamlit Cloud löst oft Treiber-Probleme.")
+        if "Fehler" in content:
+            st.error(f"Technisches Problem (Code 127): {content}")
+            st.info("💡 Lösung: Stelle sicher, dass die Datei 'packages.txt' im GitHub-Ordner liegt.")
         else:
-            # Suche nach den Zahlenwerten im gerenderten JavaScript-HTML
-            oberwald = re.search(r'Oberwald.*?(\d+)\s*min', raw_html, re.S | re.I)
-            realp = re.search(r'Realp.*?(\d+)\s*min', raw_html, re.S | re.I)
+            # Suche nach Station + Zahl + min
+            o_match = re.search(r'Oberwald.*?(\d+)\s*min', content, re.S | re.I)
+            r_match = re.search(r'Realp.*?(\d+)\s*min', content, re.S | re.I)
             
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                val_o = oberwald.group(1) if oberwald else "0"
-                st.metric("Abfahrt Oberwald", f"{val_o} Min")
-                if int(val_o) > 0: st.warning("⏳ Wartezeit")
-                else: st.success("✅ Freie Fahrt")
-
-            with col2:
-                val_r = realp.group(1) if realp else "0"
-                st.metric("Abfahrt Realp", f"{val_r} Min")
-                if int(val_r) > 0: st.warning("⏳ Wartezeit")
-                else: st.success("✅ Freie Fahrt")
+            c1, c2 = st.columns(2)
+            with c1: st.metric("Oberwald", f"{o_match.group(1) if o_match else '0'} Min")
+            with c2: st.metric("Realp", f"{r_match.group(1) if r_match else '0'} Min")
 
 st.divider()
-st.subheader("🔗 Direkter Zugriff")
-st.link_button("Offizielle MGB Webseite", "https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten")
+st.link_button("Offizielle Webseite", "https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten")
