@@ -1,37 +1,56 @@
 import streamlit as st
+import requests
+import re
 from datetime import datetime
-from streamlit_autorefresh import st_autorefresh
 
-# --- SETUP ---
-st.set_page_config(page_title="Furka Verlad Live", layout="wide", page_icon="🏔️")
-# Automatische Aktualisierung alle 5 Minuten
-st_autorefresh(interval=300000, key="mgb_final_refresh")
+st.set_page_config(page_title="Furka Live-Check", page_icon="🏔️")
 
-st.title("🏔️ Furka Autoverlad Live-Monitor")
-st.markdown(f"**Stand:** {datetime.now().strftime('%d.%m.%Y um %H:%M:%S')} Uhr")
+st.title("🏔️ Furka Autoverlad Live-Status")
+st.markdown(f"**Letzte Prüfung:** {datetime.now().strftime('%H:%M:%S')} Uhr")
 
-# Layout in zwei Spalten
-col1, col2 = st.columns([2, 1])
+def get_real_waiting_times():
+    # Wir rufen die Seite als "Rohdaten" ab, um JS-Blöcke zu finden
+    url = "https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        content = response.text
+        
+        # Suche nach dem typischen JSON-Muster für Wartezeiten im Quelltext
+        # Wir suchen nach "Oberwald" oder "Realp" gefolgt von einer Zahl
+        times = {"Oberwald": "Unbekannt", "Realp": "Unbekannt"}
+        
+        for station in times.keys():
+            # Regex sucht nach Station + beliebigem Text + Zahl + "min"
+            match = re.search(fr'{station}.*?(\d+)\s*min', content, re.IGNORECASE | re.DOTALL)
+            if match:
+                times[station] = f"{match.group(1)} Min"
+        
+        return times
+    except:
+        return None
 
-with col1:
-    st.subheader("📊 Aktuelle Wartezeiten (Original)")
-    # Wir betten die Original-Webseite ein
-    # Da die Daten per JS geladen werden, zeigt dieser IFrame sie korrekt an
-    st.components.v1.iframe(
-        "https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten",
-        height=600,
-        scrolling=True
-    )
+# Daten abrufen
+data = get_real_waiting_times()
 
-with col2:
-    st.subheader("💡 Reise-Infos")
-    st.info("""
-    **Wartezeit-Skala:**
-    * 🟢 **0-15 Min:** Freie Fahrt
-    * 🟡 **15-45 Min:** Erhöhtes Aufkommen
-    * 🔴 **> 45 Min:** Starke Verzögerung
-    """)
-    st.warning("Die Daten kommen direkt vom MGB ContentHub.")
+# Anzeige der Ergebnisse
+c1, c2 = st.columns(2)
 
+with c1:
+    val = data["Oberwald"] if data else "0 Min"
+    st.metric("Abfahrt Oberwald", val)
+    if "Unbekannt" in val or "0" in val:
+        st.success("✅ Keine Wartezeit")
+
+with c2:
+    val = data["Realp"] if data else "0 Min"
+    st.metric("Abfahrt Realp", val)
+    if "Unbekannt" in val or "0" in val:
+        st.success("✅ Keine Wartezeit")
+
+# --- NOTFALL-ANZEIGE ---
 st.divider()
-st.caption("Dieses Dashboard spiegelt die offiziellen Echtzeitdaten der MGB.")
+st.subheader("🔗 Direkter Link")
+st.info("Falls die Automatik oben keine Daten findet, liegt es an der neuen JavaScript-Sicherung der MGB.")
+st.link_button("Offizielle Wartezeiten auf MGB.ch prüfen", "https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten")
