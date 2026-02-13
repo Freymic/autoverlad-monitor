@@ -83,11 +83,34 @@ c4.metric("Goppenstein", f"{aktuelle_werte['Goppenstein']} Min")
 
 # Verlaufschart
 st.divider()
+import altair as alt # Falls noch nicht in requirements.txt, bitte hinzufügen!
+
+st.divider()
 st.subheader("📈 Verlauf (letzte 6 Stunden)")
+
 if not df_plot.empty:
-    # Daten für Diagramm aufbereiten (Zeit als Index, Orte als Spalten)
-    chart_data = df_plot.pivot_table(index='Zeit', columns='Ort', values='Wartezeit')
-    st.line_chart(chart_data)
+    # Wir schmelzen das DataFrame für Altair (Long-Format)
+    df_melted = df_plot.melt('Zeit', var_name='Ort', value_name='Wartezeit')
+
+    # Erstellung des Altair-Diagramms
+    chart = alt.Chart(df_melted).mark_line(interpolate='monotone').encode(
+        x=alt.X('Zeit:T', 
+                title='Uhrzeit',
+                axis=alt.Axis(
+                    format='%H:%M', 
+                    tickCount={'interval': 'minute', 'step': 30}, # Halbstundenschritte
+                    labelAngle=0
+                )
+        ),
+        y=alt.Y('Wartezeit:Q', title='Wartezeit (Min)'),
+        color=alt.Color('Ort:N', legend=alt.Legend(title="Verladestation")),
+        tooltip=['Zeit:T', 'Ort:N', 'Wartezeit:Q']
+    ).properties(
+        width='container',
+        height=400
+    ).interactive()
+
+    st.altair_chart(chart, use_container_width=True)
 else:
     st.info("Sammle erste Datenpunkte... Das Diagramm erscheint in Kürze.")
 
