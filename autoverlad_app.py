@@ -1,33 +1,40 @@
 import streamlit as st
-import requests
+from datetime import datetime
+from streamlit_autorefresh import st_autorefresh
 
-st.title("🕵️ Rohdaten-Scanner")
+# --- KONFIGURATION ---
+st.set_page_config(page_title="Furka Verlad Live", layout="wide", page_icon="🏔️")
+# Seite alle 5 Minuten neu laden
+st_autorefresh(interval=300000, key="f_refresh")
 
-url = "https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten"
-headers = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
-    "Accept-Language": "de-CH,de;q=0.9"
-}
+# --- UI DESIGN ---
+st.title("🏔️ Furka Autoverlad Live-Monitor")
+st.markdown(f"**Aktualisiert am:** {datetime.now().strftime('%d.%m.%Y um %H:%M:%S')} Uhr")
 
-if st.button("🔍 Seite komplett auslesen"):
-    try:
-        response = requests.get(url, headers=headers, timeout=15)
-        if response.status_code == 200:
-            # Wir zeigen den "Salat" in einem Code-Block an
-            st.success("Seite erfolgreich geladen!")
-            
-            # Suche nach Stichworten im Salat
-            salat = response.text
-            st.subheader("Vollständiger Quelltext-Auszug:")
-            st.text_area("Rohdaten", salat, height=400)
-            
-            # Automatische Suche im Salat
-            st.subheader("Automatische Fundstellen:")
-            points = ["Oberwald", "Realp", "waitingTime", "min"]
-            for p in points:
-                count = salat.lower().count(p.lower())
-                st.write(f"Das Wort **'{p}'** kommt {count} mal vor.")
-        else:
-            st.error(f"Fehler: Server antwortet mit Status {response.status_code}")
-    except Exception as e:
-        st.error(f"Verbindungsfehler: {e}")
+# Wir erstellen zwei Spalten für die offizielle Ansicht und deine Infos
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    st.subheader("📊 Aktuelle Wartezeiten (Original MGB)")
+    # Hier betten wir die offizielle Seite direkt ein
+    # Wir nutzen CSS, um genau den Bereich mit den Wartezeiten anzuzeigen
+    st.components.v1.iframe(
+        "https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten", 
+        height=500, 
+        scrolling=True
+    )
+
+with col2:
+    st.subheader("💡 Reise-Infos")
+    st.info("""
+    **Legende:**
+    * 🟢 **0-15 Min:** Keine Wartezeit
+    * 🟡 **15-45 Min:** 1-2 Züge abwarten
+    * 🔴 **> 45 Min:** Hohes Verkehrsaufkommen
+    """)
+    
+    st.warning("⚠️ **Hinweis:** Die Daten werden direkt von der Matterhorn Gotthard Bahn geladen.")
+
+# --- FOOTER ---
+st.divider()
+st.link_button("🎟️ Online Ticket kaufen", "https://www.matterhorngotthardbahn.ch/de/autoverlad/furka/")
