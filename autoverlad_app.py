@@ -1,64 +1,33 @@
 import streamlit as st
 import requests
-import json
 
-st.title("🕵️ MGB Daten-Detektiv")
+st.title("🕵️ Rohdaten-Scanner")
 
-def get_raw_graphql_dump():
-    url = "https://www.matterhorngotthardbahn.ch/graphql"
-    
-    # Wir nutzen deine exakten Header
-    headers = {
-        "Content-Type": "application/json",
-        "x-ada-client-type": "JAMES-Web",
-        "Origin": "https://www.matterhorngotthardbahn.ch",
-        "Referer": "https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten",
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
-    }
+url = "https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten"
+headers = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+    "Accept-Language": "de-CH,de;q=0.9"
+}
 
-    # Wir fragen nach dem kompletten 'route' Objekt der Seite. 
-    # Das ist der "große Topf", in dem alles drinstecken muss.
-    query = """
-    query GetPageContent {
-      route(path: "/de/stories/autoverlad-furka-wartezeiten") {
-        ... on Story {
-          id
-          name
-          content {
-            __typename
-            ... on ContentGrid {
-              items {
-                __typename
-                ... on ContentText { text }
-              }
-            }
-          }
-        }
-      }
-    }
-    """
-    
+if st.button("🔍 Seite komplett auslesen"):
     try:
-        response = requests.post(url, json={'query': query}, headers=headers, timeout=15)
-        return response.status_code, response.json()
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code == 200:
+            # Wir zeigen den "Salat" in einem Code-Block an
+            st.success("Seite erfolgreich geladen!")
+            
+            # Suche nach Stichworten im Salat
+            salat = response.text
+            st.subheader("Vollständiger Quelltext-Auszug:")
+            st.text_area("Rohdaten", salat, height=400)
+            
+            # Automatische Suche im Salat
+            st.subheader("Automatische Fundstellen:")
+            points = ["Oberwald", "Realp", "waitingTime", "min"]
+            for p in points:
+                count = salat.lower().count(p.lower())
+                st.write(f"Das Wort **'{p}'** kommt {count} mal vor.")
+        else:
+            st.error(f"Fehler: Server antwortet mit Status {response.status_code}")
     except Exception as e:
-        return 0, {"error": str(e)}
-
-status_code, datensalat = get_raw_graphql_dump()
-
-st.write(f"Server-Status: {status_code}")
-
-if status_code == 200:
-    st.subheader("Der komplette Datensalat (JSON):")
-    st.json(datensalat)
-    
-    # Zusätzliche Textsuche für dich
-    raw_text = json.dumps(datensalat)
-    st.divider()
-    st.subheader("Schnell-Scan Ergebnisse:")
-    if "Oberwald" in raw_text:
-        st.success("Gefunden: 'Oberwald' ist im Datensalat enthalten!")
-    else:
-        st.error("'Oberwald' wurde nicht im Datensalat gefunden. Der Server liefert uns nur das Grundgerüst.")
-else:
-    st.error("Konnte keine Verbindung zum GraphQL-Server herstellen.")
+        st.error(f"Verbindungsfehler: {e}")
