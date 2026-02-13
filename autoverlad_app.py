@@ -21,33 +21,35 @@ def fetch_wartezeiten():
     try:
         # --- FURKA (MGB) ---
         r_f = requests.get("https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten", timeout=10)
-        soup_f = BeautifulSoup(r_f.content, 'html.parser').get_text()
+        soup_f = BeautifulSoup(r_f.content, 'html.parser').get_text(separator=' ')
         
         for station in ["Realp", "Oberwald"]:
-            pos = soup_f.find(station)
-            if pos != -1:
-                # Wir schauen uns die nächsten 150 Zeichen nach dem Stationsnamen an
-                kontext = soup_f[pos:pos+150]
-                # Sucht flexibel nach Zahlen vor "Min", "min" oder "Minuten"
-                zahlen = re.findall(r'(\d+)\s*(?:Min|min|Minuten)', kontext)
+            # Wir suchen großzügiger: 200 Zeichen vor und nach dem Namen
+            match = re.search(f"(.{{0,200}}{station}.{{0,200}})", soup_f, re.DOTALL)
+            if match:
+                kontext = match.group(1)
+                # Suche nach Zahlen gefolgt von Zeitangaben
+                zahlen = re.findall(r'(\d+)\s*(?:Min|min|Minuten|h|Std)', kontext)
                 if zahlen:
                     daten[station] = int(zahlen[0])
-        
+                
+                # Debug-Ausgabe in der Sidebar (nur zum Testen)
+                # st.sidebar.write(f"Kontext {station}: {kontext[:100]}...")
+
         # --- LÖTSCHBERG (BLS) ---
         r_l = requests.get("https://www.bls.ch/de/fahren/autoverlad/fahrplan", timeout=10)
-        soup_l = BeautifulSoup(r_l.content, 'html.parser').get_text()
+        soup_l = BeautifulSoup(r_l.content, 'html.parser').get_text(separator=' ')
         
         for station in ["Kandersteg", "Goppenstein"]:
-            pos = soup_l.find(station)
-            if pos != -1:
-                kontext = soup_l[pos:pos+200]
-                # BLS nutzt oft das Format "30 Min"
-                zahlen = re.findall(r'(\d+)\s*(?:Min|min)', kontext)
+            match = re.search(f"(.{{0,200}}{station}.{{0,200}})", soup_l, re.DOTALL)
+            if match:
+                kontext = match.group(1)
+                zahlen = re.findall(r'(\d+)\s*(?:Min|min|h|Std)', kontext)
                 if zahlen:
                     daten[station] = int(zahlen[0])
                     
     except Exception as e:
-        st.sidebar.error(f"Fehler beim Abruf: {e}")
+        st.sidebar.error(f"Fehler: {e}")
         
     return daten
 
