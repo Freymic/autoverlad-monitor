@@ -6,12 +6,13 @@ import os
 from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
-# --- CONFIG ---
-st.set_page_config(page_title="Autoverlad Live (Official API)", layout="wide", page_icon="🏔️")
+# --- KONFIGURATION ---
+st.set_page_config(page_title="Autoverlad Live-Monitor (ASTRA)", layout="wide", page_icon="🏔️")
+# Automatische Aktualisierung alle 10 Minuten
 st_autorefresh(interval=600000, key="api_refresh_timer")
 DB_FILE = "wartezeiten_historie.csv"
 
-# Dein Token
+# Dein offizieller API-Token
 API_TOKEN = "eyJvcmciOiI2NDA2NTFhNTIyZmEwNTAwMDEyOWJiZTEiLCJpZCI6ImNlNjBiNTczNzRmNDQ3YjZiODUwZDA3ZTA5MmQ4ODk0IiwiaCI6Im11cm11cjEyOCJ9"
 
 # Deine Hardcoded-Übersetzungstabelle
@@ -25,18 +26,22 @@ UEBERSETZUNG = {
 }
 
 def text_zu_minuten(text):
+    """Sucht nach definierten Zeitangaben im Text."""
     if not text: return 0
     text = text.lower()
+    # Entferne Punkte (z.B. Min. -> Min), um Abkürzungen besser zu finden
+    text = text.replace(".", "")
     for phrase, mins in UEBERSETZUNG.items():
         if phrase in text:
             return mins
     return 0
 
 def fetch_astra_data():
+    """Ruft Daten über die SOAP-Schnittstelle gemäß Kochbuch ab."""
     daten = {"Realp": 0, "Oberwald": 0, "Kandersteg": 0, "Goppenstein": 0}
     url = "https://api.opentransportdata.swiss/TDP/Soap_Datex2/TrafficSituations/Pull"
     
-    # Exakter Body aus dem Kochbuch
+    # Offizieller SOAP-Umschlag laut opentransportdata.swiss Kochbuch
     soap_body = """<?xml version="1.0" encoding="utf-8"?>
     <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
       <soap:Body>
@@ -46,16 +51,6 @@ def fetch_astra_data():
               <country>ch</country>
               <nationalIdentifier>FEDRO</nationalIdentifier>
             </supplierIdentification>
-            <subscription>
-              <operatingMode>operatingMode1</operatingMode>
-              <subscriptionStartTime>2024-01-01T00:00:00Z</subscriptionStartTime>
-              <subscriptionState>active</subscriptionState>
-              <updateMethod>singleElementUpdate</updateMethod>
-              <target>
-                <address></address>
-                <protocol>http</protocol>
-              </target>
-            </subscription>
           </exchange>
         </d2LogicalModel>
       </soap:Body>
@@ -64,60 +59,69 @@ def fetch_astra_data():
     headers = {
         "Authorization": f"Bearer {API_TOKEN}",
         "Content-Type": "text/xml; charset=utf-8",
-        # Exakte SoapAction laut Kochbuch
         "SOAPAction": "http://opentransportdata.swiss/TDP/Soap_Datex2/Pull/v1/pullTrafficMessages"
     }
     
     try:
-        response = requests.post(url, data=soap_body.encode('utf-8'), headers=headers, timeout=45)
-        
+        response = requests.post(url, data=soap_body.encode('utf-8'), headers=headers, timeout=30)
         if response.status_code == 200:
+            # Nutzt lxml Parser (muss in requirements.txt stehen)
             soup = BeautifulSoup(response.content, "xml")
-            # In Datex-II können die Records namespaces haben (z.B. dx223:situationRecord)
             records = soup.find_all(lambda tag: "situationRecord" in tag.name)
             
+            st.sidebar.success(f"API verbunden: {len(records)} Meldungen gefunden.")
+            
             for record in records:
-                # Suche nach dem Beschreibungsfeld (comment oder value)
+                # Suche nach dem Beschreibungsfeld im XML
                 desc = record.find(lambda tag: "value" in tag.name or "comment" in tag.name)
                 if desc:
-                    txt = desc.get_text().lower()
+                    txt = desc.get_text()
                     val = text_zu_minuten(txt)
                     
-                    if "realp" in txt: daten["Realp"] = max(daten["Realp"], val)
-                    if "oberwald" in txt: daten["Oberwald"] = max(daten["Oberwald"], val)
-                    if "kandersteg" in txt: daten["Kandersteg"] = max(daten["Kandersteg"], val)
-                    if "goppenstein" in txt: daten["Goppenstein"] = max(daten["Goppenstein"], val)
+                    # Diagnose-Ausgabe für relevante Orte
+                    for loc in daten.keys():
+                        if loc.lower() in txt.lower():
+                            st.sidebar.info(f"Meldung für {loc}: {txt[:100]}...")
+                            daten[loc] = max(daten[loc], val)
         else:
-            st.sidebar.error(f"Fehler: {response.status_code}")
+            st.sidebar.error(f"API Fehler: {response.status_code}")
     except Exception as e:
         st.sidebar.error(f"Verbindungsfehler: {e}")
     return daten
 
-# --- UI & LOGIK ---
-werte = fetch_astra_data()
-ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+# --- DATENVERARBEITUNG ---
+aktuelle_werte = fetch_astra_data()
+zeitpunkt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-# Speichern
-pd.DataFrame([{"Zeit": ts, **werte}]).to_csv(
+# In CSV loggen
+pd.DataFrame([{"Zeit": zeitpunkt, **aktuelle_werte}]).to_csv(
     DB_FILE, mode='a', header=not os.path.exists(DB_FILE), index=False
 )
 
-st.title("🏔️ Autoverlad Live-Monitor (Official)")
-st.caption("Datenquelle: ASTRA via opentransportdata.swiss (SOAP API)")
+# --- UI DASHBOARD ---
+st.title("🏔️ Autoverlad Live-Monitor (ASTRA)")
+st.markdown("Offizielle Live-Daten via **opentransportdata.swiss**")
 
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Realp", f"{werte['Realp']} Min")
-c2.metric("Oberwald", f"{werte['Oberwald']} Min")
-c3.metric("Kandersteg", f"{werte['Kandersteg']} Min")
-c4.metric("Goppenstein", f"{werte['Goppenstein']} Min")
+c1.metric("Realp (Furka)", f"{aktuelle_werte['Realp']} Min")
+c2.metric("Oberwald (Furka)", f"{aktuelle_werte['Oberwald']} Min")
+c3.metric("Kandersteg (Lötschberg)", f"{aktuelle_werte['Kandersteg']} Min")
+c4.metric("Goppenstein (Lötschberg)", f"{aktuelle_werte['Goppenstein']} Min")
 
+# --- HISTORIE ---
+st.divider()
 if os.path.exists(DB_FILE):
     df = pd.read_csv(DB_FILE).drop_duplicates().sort_values('Zeit')
     df['Zeit'] = pd.to_datetime(df['Zeit'])
+    # Filter auf letzte 12 Stunden
     df = df[df['Zeit'] > (datetime.now() - timedelta(hours=12))]
+    
     if len(df) > 1:
+        st.subheader("📈 Wartezeiten-Verlauf (letzte 12h)")
         st.line_chart(df.set_index('Zeit'))
 
 if st.sidebar.button("🗑️ Verlauf löschen"):
     if os.path.exists(DB_FILE): os.remove(DB_FILE)
     st.rerun()
+
+st.caption(f"Letzte Aktualisierung: {datetime.now().strftime('%H:%M:%S')} Uhr")
