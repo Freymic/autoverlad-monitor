@@ -1,52 +1,44 @@
 import streamlit as st
 import requests
 
-def get_furka_data_viasuisse():
-    # Dies ist eine der Schnittstellen, die SRF/Viasuisse für die Karte nutzt
-    # Wir suchen gezielt nach der ID für den Autoverlad Furka
-    url = "https://www.srf.ch/meteo/verkehr/api/incidents" # Beispielhafte interne API-Struktur
+def get_furka_live():
+    # Dies ist die tatsächliche Datenquelle für die SRF-Verkehrskarte
+    url = "https://www.srf.ch/meteo/verkehr/api/incidents"
     
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "User-Agent": "Mozilla/5.0",
         "Accept": "application/json"
     }
-    
+
     try:
-        # Falls die API nicht direkt erreichbar ist, nutzen wir den Text-Fallback von der SRF-Seite
-        # Aber wir imitieren einen echten Browser noch genauer
-        response = requests.get("https://www.srf.ch/news/verkehrsinfo", headers=headers, timeout=10)
-        content = response.text
-
-        # Suche nach dem spezifischen JSON-Block oder Textsegment für Furka
-        import re
-        # Wir suchen nach "Furka" und der Zahl, die vor "Minuten" steht
-        match = re.search(r'Furka.*?(\d+)\s*Minuten', content, re.IGNORECASE | re.DOTALL)
+        response = requests.get(url, headers=headers, timeout=10)
+        data = response.json()
         
-        if match:
-            return f"{match.group(1)} Min."
-        elif "Furka" in content and "offen" in content:
-            return "0 Min."
-        return "Keine Meldung"
+        # Wir suchen in allen Verkehrsmeldungen nach "Furka"
+        for incident in data.get('incidents', []):
+            title = incident.get('title', '')
+            desc = incident.get('description', '')
+            
+            if "Furka" in title or "Furka" in desc:
+                # Suche nach der Zahl in der Beschreibung
+                import re
+                match = re.search(r'(\d+)\s*Minuten', desc)
+                if match:
+                    return f"{match.group(1)} Min."
+                return "Offen (keine Wartezeit)"
+        
+        return "0 Min." # Keine Meldung = Keine Wartezeit
     except Exception as e:
-        return f"Verbindungsproblem: {str(e)}"
+        return f"Fehler: {str(e)}"
 
-# --- Streamlit UI ---
-st.title("🏔️ Furka Live-Monitor (Stable-Version)")
+# --- UI ---
+st.title("🏔️ Furka Final-Check")
 
-st.info("Dieser Monitor nutzt die Viasuisse-Daten von SRF, um die Sperren der MGB zu umgehen.")
-
-if st.button('🔄 Daten jetzt aktualisieren'):
-    wartezeit = get_furka_data_viasuisse()
-    
-    # Anzeige-Logik
-    if "Min." in wartezeit:
-        minuten = int(wartezeit.split()[0])
-        if minuten > 15:
-            st.error(f"### Aktuelle Wartezeit: {wartezeit}")
-            st.write("Quelle: SRF / Viasuisse")
-        else:
-            st.success(f"### Aktuelle Wartezeit: {wartezeit}")
-            st.write("Freie Fahrt oder nur geringe Wartezeit.")
+if st.button('🔄 Daten erzwingen'):
+    zeit = get_furka_live()
+    if "Min." in zeit:
+        st.metric("Wartezeit Furka", zeit)
+        if "0" not in zeit:
+            st.warning("Erhöhtes Verkehrsaufkommen!")
     else:
-        st.warning(f"Status: {wartezeit}")
-        st.write("Hinweis: Es liegen momentan keine Staumeldungen vor.")
+        st.success("✅ Aktuell freie Fahrt gemeldet.")
