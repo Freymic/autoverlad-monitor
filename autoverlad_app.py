@@ -6,12 +6,15 @@ import os
 from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
-# --- SETUP ---
-st.set_page_config(page_title="Autoverlad Live", layout="wide")
+# --- CONFIG ---
+st.set_page_config(page_title="Autoverlad Live (ASTRA)", layout="wide", page_icon="🏔️")
 st_autorefresh(interval=600000, key="api_refresh")
 DB_FILE = "wartezeiten_historie.csv"
 
-# DEINE HARDCODED TABELLE
+# DEIN OFFIZIELLER TOKEN
+API_TOKEN = "eyJvcmciOiI2NDA2NTFhNTIyZmEwNTAwMDEyOWJiZTEiLCJpZCI6ImNlNjBiNTczNzRmNDQ3YjZiODUwZDA3ZTA5MmQ4ODk0IiwiaCI6Im11cm11cjEyOCJ9"
+
+# DEINE HARDCODED ÜBERSETZUNG (0 Min bis 4 Stunden)
 UEBERSETZUNG = {
     "4 stunden": 240, "3 stunden 45 minuten": 225, "3 stunden 30 minuten": 210,
     "3 stunden 15 minuten": 195, "3 stunden": 180, "2 stunden 45 minuten": 165,
@@ -21,72 +24,82 @@ UEBERSETZUNG = {
     "keine wartezeit": 0
 }
 
-def check_text(text):
+def text_zu_min(text):
+    if not text: return 0
     text = text.lower()
     for phrase, mins in UEBERSETZUNG.items():
         if phrase in text:
             return mins
     return 0
 
-def fetch_data():
+def fetch_astra_data():
     daten = {"Realp": 0, "Oberwald": 0, "Kandersteg": 0, "Goppenstein": 0}
+    # Offizieller OJP Situations Endpoint
+    url = "https://api.opentransportdata.swiss/ojp-la-astra/v1/situations"
+    headers = {
+        "Authorization": f"Bearer {API_TOKEN}",
+        "Accept": "application/xml"
+    }
     
-    # --- VERSUCH: LÖTSCHBERG (BLS) ---
     try:
-        r_l = requests.get("https://www.bls.ch/de/fahren/autoverlad/fahrplan", timeout=10)
-        soup_l = BeautifulSoup(r_l.content, 'html.parser').get_text(separator=' ')
-        for loc in ["Kandersteg", "Goppenstein"]:
-            idx = soup_l.find(loc)
-            if idx != -1:
-                daten[loc] = check_text(soup_l[idx:idx+250])
-    except: pass
-
-    # --- VERSUCH: FURKA (MGB) ---
-    # Da die MGB-Webseite oft leer ist, nutzen wir den TCS/Meteo-Verkehrsfeed, 
-    # der oft die Grundlage für diese Anzeigen ist.
-    try:
-        # Wir versuchen die Furka-Daten über einen Umweg zu bekommen, 
-        # falls die Hauptseite "leer" bleibt.
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        r_f = requests.get("https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten", headers=headers, timeout=10)
-        # Wenn im HTML nichts ist, schauen wir, ob wir im Text versteckte JSON-Daten finden
-        soup_f = BeautifulSoup(r_f.content, 'html.parser')
-        full_text = soup_f.get_text(separator=' ')
-        
-        for loc in ["Realp", "Oberwald"]:
-            idx = full_text.find(loc)
-            if idx != -1:
-                daten[loc] = check_text(full_text[idx:idx+300])
+        response = requests.get(url, headers=headers, timeout=20)
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.content, "xml")
+            # Wir suchen alle Meldungen (SituationRecord)
+            records = soup.find_all("situationRecord")
             
-        # Falls immer noch 0, schauen wir auf der TCS Seite (oft stabiler für Furka)
-        if daten["Realp"] == 0 and daten["Oberwald"] == 0:
-            r_tcs = requests.get("https://www.tcs.ch/de/tools/verkehrsinfo/aktuelle-lage.php", timeout=10)
-            if "Furka" in r_tcs.text:
-                # Hier würde man im Notfall die TCS Daten parsen
-                pass
-    except: pass
-    
+            for record in records:
+                desc = record.find("description")
+                if desc:
+                    txt = desc.get_text()
+                    # Zuweisung basierend auf Textinhalt
+                    val = text_zu_min(txt)
+                    if "Realp" in txt: daten["Realp"] = val
+                    if "Oberwald" in txt: daten["Oberwald"] = val
+                    if "Kandersteg" in txt: daten["Kandersteg"] = val
+                    if "Goppenstein" in txt: daten["Goppenstein"] = val
+        else:
+            st.error(f"API Fehler: {response.status_code}")
+    except Exception as e:
+        st.error(f"Verbindungsfehler: {e}")
     return daten
 
-# --- UI & LOGIK ---
-werte = fetch_data()
-ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+# --- DATENVERARBEITUNG ---
+werte = fetch_astra_data()
+jetzt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-# Speichern
-pd.DataFrame([{"Zeit": ts, **werte}]).to_csv(DB_FILE, mode='a', header=not os.path.exists(DB_FILE), index=False)
+# In CSV loggen
+df_new = pd.DataFrame([{"Zeit": jetzt, **werte}])
+if not os.path.exists(DB_FILE):
+    df_new.to_csv(DB_FILE, index=False)
+else:
+    df_new.to_csv(DB_FILE, mode='a', header=False, index=False)
 
-st.title("🏔️ Autoverlad Monitor")
+# --- DASHBOARD ---
+st.title("🏔️ Autoverlad Live-Monitor")
+st.markdown("Offizielle Live-Daten vom **Bundesamt für Strassen (ASTRA)**")
+
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Realp", f"{werte['Realp']} Min")
 c2.metric("Oberwald", f"{werte['Oberwald']} Min")
 c3.metric("Kandersteg", f"{werte['Kandersteg']} Min")
 c4.metric("Goppenstein", f"{werte['Goppenstein']} Min")
 
+# --- HISTORIE ---
+st.divider()
+if st.sidebar.button("🗑️ Verlauf löschen"):
+    if os.path.exists(DB_FILE): os.remove(DB_FILE)
+    st.rerun()
+
 if os.path.exists(DB_FILE):
     df = pd.read_csv(DB_FILE).drop_duplicates()
     df['Zeit'] = pd.to_datetime(df['Zeit'])
-    st.line_chart(df.set_index('Zeit'))
+    # Letzte 12 Stunden für bessere Übersicht
+    df = df[df['Zeit'] > (datetime.now() - timedelta(hours=12))].sort_values('Zeit')
+    
+    if len(df) > 1:
+        st.subheader("📈 Wartezeiten-Verlauf")
+        # Wir nutzen das native Streamlit Chart (robuster als Altair bei Fehlern)
+        st.line_chart(df.set_index('Zeit'))
 
-if st.sidebar.button("🗑️ Reset"):
-    if os.path.exists(DB_FILE): os.remove(DB_FILE)
-    st.rerun()
+st.caption(f"Letzte Aktualisierung: {datetime.now().strftime('%H:%M:%S')} Uhr")
