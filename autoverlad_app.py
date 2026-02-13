@@ -14,49 +14,40 @@ DB_FILE = "wartezeiten_historie.csv"
 
 def fetch_wartezeiten():
     daten = {"Realp": 0, "Oberwald": 0, "Kandersteg": 0, "Goppenstein": 0}
-    raw_text_debug = ""
-    
     try:
-        # --- FURKA (MGB) ---
+        # FURKA (MGB)
         r_f = requests.get("https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten", timeout=15)
         soup_f = BeautifulSoup(r_f.content, 'html.parser')
         text_f = " ".join(soup_f.get_text(separator=' ').split())
-        raw_text_debug = text_f[:1500]
         
         for station in ["Realp", "Oberwald"]:
-            # Suche im Umkreis von 500 Zeichen
             match = re.search(f"(.{{0,500}}{station}.{{0,500}})", text_f, re.IGNORECASE)
             if match:
                 kontext = match.group(1)
-                zahlen = re.findall(r'(\d+)\s*(?:Min|min|Minuten|h|Std)', kontext)
+                zahlen = re.findall(r'(\d+)', kontext)
+                # Wir nehmen die erste Zahl, die im Kontext der Station auftaucht
                 if zahlen:
-                    daten[station] = int(zahlen[0])
-                # Spezialfall: Wenn 'Wartezeit' vorkommt aber keine Zahl direkt dabei steht
-                elif "Wartezeit" in kontext and any(x in kontext for x in ["30", "60", "90"]):
-                    find_val = re.findall(r'(30|60|90|120)', kontext)
-                    if find_val: daten[station] = int(find_val[0])
+                    val = int(zahlen[0])
+                    # Plausibilitätscheck: Nur Werte zwischen 5 und 240 Min
+                    if 5 <= val <= 240: daten[station] = val
 
-        # --- LÖTSCHBERG (BLS) ---
+        # LÖTSCHBERG (BLS)
         r_l = requests.get("https://www.bls.ch/de/fahren/autoverlad/fahrplan", timeout=15)
         text_l = " ".join(BeautifulSoup(r_l.content, 'html.parser').get_text(separator=' ').split())
-        
         for station in ["Kandersteg", "Goppenstein"]:
             match = re.search(f"(.{{0,400}}{station}.{{0,400}})", text_l, re.IGNORECASE)
             if match:
-                kontext = match.group(1)
-                zahlen = re.findall(r'(\d+)\s*(?:Min|min|h|Std)', kontext)
+                zahlen = re.findall(r'(\d+)', match.group(1))
                 if zahlen: daten[station] = int(zahlen[0])
+    except:
+        pass
+    return daten
 
-    except Exception as e:
-        st.sidebar.error(f"Scraping Fehler: {e}")
-        
-    return daten, raw_text_debug
-
-# --- 2. LOGIK ---
+# --- 2. DATEN-LOGIK ---
 st.set_page_config(page_title="Autoverlad Monitor", layout="wide")
-aktuelle_werte, raw_debug = fetch_wartezeiten()
+aktuelle_werte = fetch_wartezeiten()
 
-# Speichern in CSV
+# Speichern
 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 df_new = pd.DataFrame([{"Zeit": now, **aktuelle_werte}])
 if not os.path.isfile(DB_FILE):
@@ -67,4 +58,33 @@ else:
 # --- 3. UI ---
 st.title("🏔️ Autoverlad Live-Monitor")
 
-c1, c2, c3, c4 =
+# Die Kacheln (Metriken)
+cols = st.columns(4)
+stationen_liste = list(aktuelle_werte.keys())
+for i, station in enumerate(stationen_liste):
+    cols[i].metric(station, f"{aktuelle_werte[station]} Min")
+
+# --- 4. DIAGRAMM ---
+st.divider()
+st.subheader("📈 Verlauf (letzte 6 Stunden)")
+
+if os.path.isfile(DB_FILE):
+    try:
+        df_hist = pd.read_csv(DB_FILE).drop_duplicates().sort_values('Zeit')
+        df_hist['Zeit'] = pd.to_datetime(df_hist['Zeit'])
+        df_plot = df_hist[df_hist['Zeit'] > (datetime.now() - timedelta(hours=6))]
+        
+        if len(df_plot) > 1:
+            df_melted = df_plot.melt('Zeit', var_name='Station', value_name='Wartezeit')
+            chart = alt.Chart(df_melted).mark_line(point=True).encode(
+                x=alt.X('Zeit:T', title='Uhrzeit', axis=alt.Axis(format='%H:%M')),
+                y=alt.Y('Wartezeit:Q', title='Minuten', scale=alt.Scale(domain=[0, 120])),
+                color='Station:N'
+            ).properties(height=400).interactive()
+            st.altair_chart(chart, use_container_width=True)
+        else:
+            st.info("Sammle Daten für das Diagramm...")
+    except:
+        st.error("Fehler beim Laden der Historie.")
+
+st.caption(f"Letztes Update: {datetime.now().strftime('%H:%M:%S')}")
