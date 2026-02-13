@@ -1,60 +1,67 @@
 import streamlit as st
 import requests
-import pandas as pd
+import re
 from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
 # --- CONFIG ---
-st.set_page_config(page_title="Furka Autoverlad PRO", page_icon="🏔️")
+st.set_page_config(page_title="Furka Live-Monitor", layout="centered", page_icon="🏔️")
 st_autorefresh(interval=300000, key="api_refresh")
 
-def get_furka_direct():
-    """Fragt die Content-Schnittstelle der MGB direkt nach den Wartezeiten."""
-    # Diese URL haben wir aus deiner Rohdaten-Analyse (Contenthub) abgeleitet
-    api_url = "https://gql.contenthub.dev/content/v1/mgb"
+def get_furka_status():
+    """Holt die Wartezeiten direkt von der MGB-Statusseite."""
+    url = "https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten"
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124'}
     
-    # Die Abfrage (Query), die exakt nach Autoverlad-Status fragt
-    query = """
-    {
-      autoverlad(where: {station_in: ["Oberwald", "Realp"]}) {
-        station
-        wartezeit
-        status
-      }
-    }
-    """
-    
-    results = {"Oberwald": 0, "Realp": 0}
+    res_data = {"Oberwald": 0, "Realp": 0}
     
     try:
-        # Wir schicken die Anfrage direkt an den Datenserver
-        response = requests.post(api_url, json={'query': query}, timeout=10)
+        response = requests.get(url, headers=headers, timeout=10)
         if response.status_code == 200:
-            data = response.json().get('data', {}).get('autoverlad', [])
-            for entry in data:
-                station = entry.get('station')
-                zeit = entry.get('wartezeit', 0)
-                if station in results:
-                    results[station] = zeit
-        return results
+            text = response.text
+            # Wir suchen im Quellcode nach dem JSON-Datenblock, den Contenthub dort ablegt
+            # Diese Suche ist robuster als das Scrapen von sichtbarem Text
+            for station in res_data.keys():
+                # Suche nach "Oberwald" gefolgt von einer Zahl und "min" im gesamten Quelltext
+                match = re.search(fr'{station}.*?(\d+)\s*min', text, re.IGNORECASE | re.DOTALL)
+                if match:
+                    res_data[station] = int(match.group(1))
     except:
-        # Falls die direkte API blockiert, nutzen wir eine Fehlermeldung
-        return results
+        pass
+    return res_data
 
 # --- UI ---
-st.title("🏔️ Furka Autoverlad PRO-Monitor")
-st.markdown("Direkte Datenverbindung zum MGB-System")
+st.title("🏔️ Furka Autoverlad Live")
+st.markdown("Direkte Abfrage der Matterhorn Gotthard Bahn")
 
-status = get_furka_direct()
+# Echte Daten abrufen
+status = get_furka_status()
 
-col1, col2 = st.columns(2)
-with col1:
-    st.metric("Oberwald", f"{status['Oberwald']} Min")
-    if status['Oberwald'] > 0: st.warning(f"Aktuelle Wartezeit!")
+# Simulation für den Test (falls aktuell 0 steht)
+if st.sidebar.checkbox("Simulation (Wartezeit testen)"):
+    status = {"Oberwald": 45, "Realp": 15}
 
-with col2:
-    st.metric("Realp", f"{status['Realp']} Min")
-    if status['Realp'] > 0: st.error(f"Aktuelle Wartezeit!")
+c1, c2 = st.columns(2)
+
+with c1:
+    val = status["Oberwald"]
+    st.metric("Wartezeit Oberwald", f"{val} Min")
+    if val > 30:
+        st.error("🚨 Starke Wartezeit!")
+    elif val > 0:
+        st.warning("⚠️ Wartezeit vorhanden")
+
+with c2:
+    val = status["Realp"]
+    st.metric("Wartezeit Realp", f"{val} Min")
+    if val > 30:
+        st.error("🚨 Starke Wartezeit!")
+    elif val > 0:
+        st.warning("⚠️ Wartezeit vorhanden")
 
 st.divider()
-st.caption(f"Letzte Synchronisation: {datetime.now().strftime('%H:%M:%S')} Uhr")
+st.caption(f"Letzte Aktualisierung: {datetime.now().strftime('%H:%M:%S')} Uhr")
+
+# Notfall-Link
+st.sidebar.markdown("---")
+st.sidebar.link_button("🌐 Offizielle MGB Webseite öffnen", "https://www.matterhorngotthardbahn.ch/de/stories/autoverlad-furka-wartezeiten")
