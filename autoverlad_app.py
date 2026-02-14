@@ -1,92 +1,77 @@
 import streamlit as st
-import requests
 import xml.etree.ElementTree as ET
 import re
 
-# --- Funktionen ---
-
-def get_furka_rss_data():
-    """Liest den RSS-Feed aus und gibt Rohdaten sowie die extrahierte Zeit zurück."""
-    url = "https://mgb-prod.oevfahrplan.ch/incident-manager-api/incidentmanager/rss?publicId=av_furka&lang=de"
-    
-    debug_info = {
-        "status_code": None,
-        "raw_xml": "",
-        "found_items": 0,
-        "error": None
+def parse_furka_rss(xml_content):
+    """Extrahiert Wartezeiten für Oberwald und Realp aus dem RSS-Feed."""
+    results = {
+        "Oberwald": {"zeit": "0 Min.", "text": "Keine Meldung"},
+        "Realp": {"zeit": "0 Min.", "text": "Keine Meldung"}
     }
     
     try:
-        response = requests.get(url, timeout=10)
-        debug_info["status_code"] = response.status_code
-        debug_info["raw_xml"] = response.text
+        root = ET.fromstring(xml_content)
+        items = root.findall('.//item')
         
-        if response.status_code == 200:
-            # XML parsen
-            root = ET.fromstring(response.content)
-            items = root.findall('.//item')
-            debug_info["found_items"] = len(items)
+        for item in items:
+            title = item.find('title').text
+            desc = item.find('description').text
+            full_text = title + " " + desc
             
-            if items:
-                # Wir nehmen die Beschreibung des aktuellsten Eintrags
-                description = items[0].find('description').text
+            # Bestimme die Richtung
+            direction = None
+            if "Oberwald" in full_text:
+                direction = "Oberwald"
+            elif "Realp" in full_text:
+                direction = "Realp"
                 
-                # Suche nach der Wartezeit (Zahl vor 'Minuten')
-                match = re.search(r'(\d+)\s*Minuten', description)
-                if match:
-                    return f"{match.group(1)} Min.", debug_info
+            if direction:
+                # Suche nach Zeitangaben (Minuten oder Stunden)
+                results[direction]["text"] = title
                 
-                # Fallback: Wenn 'offen' im Text steht, aber keine Zahl
-                if "offen" in description.lower():
-                    return "0 Min.", debug_info
+                # Suche nach "X Stunde(n)"
+                std_match = re.search(r'(\d+)\s*Stunde', full_text)
+                # Suche nach "X Minute(n)"
+                min_match = re.search(r'(\d+)\s*Minute', full_text)
+                
+                if std_match:
+                    results[direction]["zeit"] = f"{std_match.group(1)} Std."
+                elif min_match:
+                    results[direction]["zeit"] = f"{min_match.group(1)} Min."
+                elif "keine wartezeit" in full_text.lower():
+                    results[direction]["zeit"] = "0 Min."
                     
-            return "0 Min. (Keine Meldung)", debug_info
-            
+        return results
     except Exception as e:
-        debug_info["error"] = str(e)
-        return "Fehler", debug_info
-    
-    return "Keine Daten", debug_info
+        st.error(f"Parsing Fehler: {e}")
+        return results
 
-# --- Streamlit UI ---
+# --- UI Layout ---
+st.title("🏔️ Furka Autoverlad Live-Status")
+st.markdown("Echtzeit-Daten direkt aus dem MGB Incident-Manager.")
 
-st.set_page_config(page_title="Furka RSS Debugger", page_icon="🏔️")
+# Simulation der Antwort, die du gepostet hast (für die App via requests.get().text ersetzen)
+xml_data = """[DEIN XML OBEN]""" 
 
-st.title("🏔️ Furka Autoverlad Monitor")
-st.markdown("Abfrage via **MGB RSS-Schnittstelle** (stabilste Methode).")
+# Daten verarbeiten
+daten = parse_furka_rss(xml_data)
 
-if st.button('🔍 Daten jetzt abrufen'):
-    wartezeit, debug = get_furka_rss_data()
-    
-    # Hauptanzeige
-    if wartezeit == "Fehler":
-        st.error(f"Verbindungsfehler: {debug['error']}")
-    else:
-        # Große Anzeige der Wartezeit
-        st.metric(label="Aktuelle Wartezeit Furka", value=wartezeit)
-        
-        # Visuelles Feedback
-        min_val = int(re.search(r'\d+', wartezeit).group()) if any(char.isdigit() for char in wartezeit) else 0
-        if min_val > 0:
-            st.warning(f"Achtung: Aktuell {min_val} Minuten Wartezeit gemeldet!")
-        else:
-            st.success("Freie Fahrt! Der Verlad ist offen und ohne nennenswerte Wartezeit.")
+# Anzeige in zwei Spalten
+col1, col2 = st.columns(2)
 
-# --- Debug Sektion ---
-with st.expander("🛠️ Debug-Informationen anzeigen (für Entwickler)"):
-    st.write("Diese Informationen helfen zu verstehen, warum die App ggf. 0 Min anzeigt.")
-    
-    if 'debug' in locals():
-        st.write(f"**HTTP Status:** {debug['status_code']}")
-        st.write(f"**Gefundene Meldungen:** {debug['found_items']}")
-        
-        if debug['raw_xml']:
-            st.code(debug['raw_xml'], language='xml')
-        
-        if debug['error']:
-            st.error(f"Fehlermeldung: {debug['error']}")
-    else:
-        st.info("Noch keine Daten abgerufen. Klicke oben auf den Button.")
+with col1:
+    st.subheader("📍 Oberwald (VS)")
+    zeit_ow = daten["Oberwald"]["zeit"]
+    st.metric("Wartezeit", zeit_ow, delta="Frei" if zeit_ow == "0 Min." else "Stau")
+    st.caption(daten["Oberwald"]["text"])
 
-st.divider()
-st.caption("Datenquelle: Matterhorn Gotthard Bahn (MGB) RSS Incident Manager")
+with col2:
+    st.subheader("📍 Realp (UR)")
+    zeit_re = daten["Realp"]["zeit"]
+    # Hier würde jetzt "1 Std." stehen
+    st.metric("Wartezeit", zeit_re, delta="Verzögerung" if zeit_re != "0 Min." else None, delta_color="inverse")
+    st.caption(daten["Realp"]["text"])
+
+# Warnhinweis falls irgendwo Stau ist
+if "Std" in zeit_ow or "Std" in zeit_re or "Min" in zeit_ow and int(re.search(r'\d+', zeit_ow).group()) > 20:
+    st.warning("⚠️ Achtung: Es besteht eine erhebliche Wartezeit an mindestens einer Verladestation.")
