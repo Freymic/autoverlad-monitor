@@ -80,3 +80,15 @@ with st.expander("🛠️ Debug Informationen"):
         st.dataframe(df_history, use_container_width=True)
 
 st.caption(f"Letztes Update: {datetime.now(CH_TZ).strftime('%H:%M:%S')} | Intervall: 5 Min")
+
+# --- NEUER ABSCHNITT: FAHRPLAN ---
+st.subheader("🕒 Nächste Abfahrten")
+timetables = get_all_timetables()
+t_cols = st.columns(4)
+
+for i, (name, departures) in enumerate(timetables.items()):
+    with t_cols[i]:
+        with st.container(border=True):
+            st.markdown(f"**{name}**")
+            for dep in departures:
+                st.write(f"🚆 {dep}")
