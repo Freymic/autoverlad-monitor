@@ -6,98 +6,117 @@ import json
 from datetime import datetime
 import pytz
 
-# Konstanten für die App (Behebt ImportError aus image_8d62e0.png und image_8d7123.png)
+# Konstanten
 DB_NAME = 'autoverlad.db'
 CH_TZ = pytz.timezone('Europe/Zurich')
 
 def init_db():
+    """Initialisiert die Datenbank-Tabelle."""
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    # Wir nennen die Spalte 'wait_time', um Verwechslungen mit dem Wort 'minutes' zu vermeiden
     c.execute('''CREATE TABLE IF NOT EXISTS stats
-                 (timestamp DATETIME, station TEXT, wait_time INTEGER, raw_text TEXT)''')
+                 (timestamp DATETIME, station TEXT, minutes INTEGER, raw_text TEXT)''')
     conn.commit()
     conn.close()
 
 def parse_time_to_minutes(time_str):
-    """Extrahiert Zahlen aus Texten (z.B. '30 Min' -> 30)."""
+    """Wandelt Texte wie '1 Std 20 Min' oder '15 Min' in reine Minuten um."""
     if not time_str or "Keine" in time_str:
         return 0
-    digits = ''.join(filter(str.isdigit, time_str))
-    try:
-        return int(digits) if digits else 0
-    except ValueError:
-        return 0
+    
+    total_minutes = 0
+    # Suche nach Stunden
+    hours_match = re.search(r'(\d+)\s*Stunde', time_str)
+    if hours_match:
+        total_minutes += int(hours_match.group(1)) * 60
+    
+    # Suche nach Minuten
+    minutes_match = re.search(r'(\d+)\s*Minute', time_str)
+    if minutes_match:
+        total_minutes += int(minutes_match.group(1))
+    
+    # Fallback: Nur Zahlen extrahieren, falls kein Schlagwort gefunden wurde
+    if total_minutes == 0:
+        digits = ''.join(filter(str.isdigit, time_str))
+        total_minutes = int(digits) if digits else 0
+        
+    return total_minutes
 
 def save_to_db(data):
+    """Speichert die Daten mit Schweizer Zeitstempel."""
     try:
         conn = sqlite3.connect(DB_NAME)
         c = conn.cursor()
-        # WICHTIG: ISO-Format für den Zeitstempel (YYYY-MM-DD HH:MM:SS)
         timestamp = datetime.now(CH_TZ).strftime('%Y-%m-%d %H:%M:%S')
         for station, info in data.items():
             c.execute("INSERT INTO stats VALUES (?, ?, ?, ?)",
-                      (timestamp, station, int(info.get('min', 0)), info.get('raw', '')))
+                      (timestamp, station, info.get('min', 0), info.get('raw', '')))
         conn.commit()
         conn.close()
     except Exception as e:
         print(f"DB Error: {e}")
 
 def fetch_all_data():
+    """Holt Daten von Furka und Lötschberg mit Profi-Headern."""
     results = {}
     
-    # --- 1. FURKA LOGIK (RSS-Version) ---
+    # Die neuen Header, damit die BLS-API uns als Browser erkennt
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*'
+    }
+
+    # --- 1. FURKA (RSS) ---
     try:
         f_url = "https://mgb-prod.oevfahrplan.ch/incident-manager-api/incidentmanager/rss?publicId=av_furka&lang=de"
-        f_resp = requests.get(f_url, timeout=10)
+        f_resp = requests.get(f_url, headers=headers, timeout=10)
         f_resp.encoding = 'utf-8'
         root = ET.fromstring(f_resp.content)
         
-        # Standardwerte (image_8dd31a.png)
-        results["Oberwald"] = {"min": 0, "raw": "Aktuell besteht an der Verladestation Oberwald (VS) des Autoverlads Furka keine Wartezeit."}
-        results["Realp"] = {"min": 0, "raw": "Aktuell besteht an der Verladestation Realp (UR) des Autoverlads Furka keine Wartezeit."}
+        results["Oberwald"] = {"min": 0, "raw": "Keine Wartezeit."}
+        results["Realp"] = {"min": 0, "raw": "Keine Wartezeit."}
         
         for item in root.findall('.//item'):
-            title = item.find('title').text if item.find('title') is not None else ""
-            desc = item.find('description').text if item.find('description') is not None else ""
+            title = item.find('title').text or ""
+            desc = item.find('description').text or ""
             full = f"{title} {desc}"
-            m = re.search(r'(\d+)\s*Minute', full); h = re.search(r'(\d+)\s*Stunde', full)
-            val = (int(h.group(1))*60 if h else int(m.group(1)) if m else 0)
+            val = parse_time_to_minutes(full)
             
-            if "Oberwald" in full: results["Oberwald"] = {"min": val, "raw": desc}
-            if "Realp" in full: results["Realp"] = {"min": val, "raw": desc}
-    except:
-        pass
+            if "Oberwald" in full: 
+                results["Oberwald"] = {"min": val, "raw": desc}
+            if "Realp" in full: 
+                results["Realp"] = {"min": val, "raw": desc}
+    except Exception as e:
+        print(f"Furka Fehler: {e}")
 
-    # --- 2. LÖTSCHBERG LOGIK (Angepasst an API-Struktur aus image_8de924.png) ---
+    # --- 2. LÖTSCHBERG (JSON API) ---
     try:
         l_url = "https://www.bls.ch/api/avwV2/delays?dataSourceId={808904A8-0874-44AC-8DE3-4A5FC33D8CF1}"
-        response = requests.get(l_url, timeout=10)
-        l_data = response.json() # Das ist das gesamte Objekt (image_8de924.png)
+        response = requests.get(l_url, headers=headers, timeout=10)
         
-        # Wir greifen auf die Liste unter dem Schlüssel 'Stations' zu
-        stations_list = l_data.get("Stations", [])
-        
-        for entry in stations_list:
-            name = entry.get("Station") # "Kandersteg" oder "Goppenstein"
-            msg = entry.get("DelayMessage") # "Keine Wartezeiten"
-            
-            if name in ["Kandersteg", "Goppenstein"]:
-                results[name] = {
-                    "min": parse_time_to_minutes(msg),
-                    # Wir speichern das Element exakt so, wie es in der API-Antwort steht
-                    "raw": json.dumps(entry, ensure_ascii=False)
-                }
+        if response.status_code == 200:
+            l_data = response.json()
+            # Wir navigieren direkt in die "Stations" Liste deiner Beispiel-Antwort
+            for entry in l_data.get("Stations", []):
+                name = entry.get("Station")
+                msg = entry.get("DelayMessage")
+                
+                if name in ["Kandersteg", "Goppenstein"]:
+                    results[name] = {
+                        "min": parse_time_to_minutes(msg),
+                        "raw": json.dumps(entry, ensure_ascii=False)
+                    }
+        else:
+            print(f"Lötschberg API Status Fehler: {response.status_code}")
     except Exception as e:
-        print(f"Lötschberg API Error: {e}")
+        print(f"Lötschberg API Verbindungsfehler: {e}")
 
-    # Fallback, falls die API-Abfrage für Lötschberg komplett scheitert
-    for s in ["Kandersteg", "Goppenstein"]:
+    # Sicherheitshalber Keys auffüllen
+    for s in ["Kandersteg", "Goppenstein", "Oberwald", "Realp"]:
         if s not in results:
-            results[s] = {"min": 0, "raw": "Keine Info"}
+            results[s] = {"min": 0, "raw": "Keine Daten verfügbar"}
 
-    save_to_db(results)
     return results
 
-# Alias für die App-Importe (image_8d62e0.png)
+# Wichtig für den Import in autoverlad_app.py
 get_quantized_data = fetch_all_data
