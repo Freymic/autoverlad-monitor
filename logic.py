@@ -17,6 +17,18 @@ def init_db():
     conn.commit()
     conn.close()
 
+def get_db_status():
+    """Gibt technische Infos zur Datenbank zurück."""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*), MIN(timestamp), MAX(timestamp) FROM stats")
+        count, first, last = c.fetchone()
+        conn.close()
+        return {"eintraege": count, "aeltester": first, "neuester": last}
+    except:
+        return {"eintraege": 0, "aeltester": "-", "neuester": "-"}
+
 def parse_time_to_minutes(time_str):
     if not time_str or any(word in time_str.lower() for word in ["keine", "no", "none"]):
         return 0
@@ -24,7 +36,6 @@ def parse_time_to_minutes(time_str):
     return int(digits) if digits else 0
 
 def save_to_db(data):
-    """Speichert Daten im 5-Minuten-Raster (xx:00, xx:05...)."""
     try:
         conn = sqlite3.connect(DB_NAME)
         c = conn.cursor()
@@ -39,7 +50,6 @@ def save_to_db(data):
                 c.execute("INSERT INTO stats VALUES (?, ?, ?, ?)",
                           (ts_str, station, info.get('min', 0), info.get('raw', '')))
         
-        # Cleanup: Alles älter als 14 Tage löschen
         cutoff = (now - timedelta(days=14)).strftime('%Y-%m-%d %H:%M:%S')
         c.execute("DELETE FROM stats WHERE timestamp < ?", (cutoff,))
         conn.commit()
@@ -48,9 +58,7 @@ def save_to_db(data):
         print(f"DB Error: {e}")
 
 def fetch_all_data():
-    """Wartezeiten abrufen."""
     results = {}
-    # FURKA
     try:
         f_url = "https://mgb-prod.oevfahrplan.ch/incident-manager-api/incidentmanager/rss?publicId=av_furka&lang=de"
         f_resp = requests.get(f_url, timeout=10)
@@ -64,7 +72,6 @@ def fetch_all_data():
             if "Realp" in full: results["Realp"] = {"min": val, "raw": full}
     except: pass
 
-    # LÖTSCHBERG
     try:
         l_url = "https://www.bls.ch/api/avwV2/delays?dataSourceId={808904A8-0874-44AC-8DE3-4A5FC33D8CF1}"
         l_res = requests.get(l_url, timeout=10).json()
@@ -76,10 +83,8 @@ def fetch_all_data():
     return results
 
 def fetch_bls_timetable():
-    """Holt Fahrplan direkt von BLS (Kandersteg/Goppenstein)."""
     url = "https://www.bls.ch/avl/AutoverladWidgetV2/GetAutoverladModel"
     try:
-        # POST Request ohne Payload liefert Standard-Widget-Daten
         res = requests.post(url, json={"query": ""}, timeout=10).json()
         bls_map = {}
         for s in res.get('Stations', []):
@@ -92,7 +97,6 @@ def fetch_bls_timetable():
         return {"Kandersteg": ["Fehler"], "Goppenstein": ["Fehler"]}
 
 def fetch_furka_timetable(sid):
-    """Holt Fahrplan für Furka via OpenData."""
     try:
         url = f"https://transport.opendata.ch/v1/stationboard?id={sid}&limit=10"
         res = requests.get(url, timeout=5).json()
@@ -106,7 +110,6 @@ def fetch_furka_timetable(sid):
     except: return ["Fehler"]
 
 def get_all_timetables():
-    """Kombiniert BLS und Furka Fahrpläne."""
     data = fetch_bls_timetable()
     data["Oberwald"] = fetch_furka_timetable("8505169")
     data["Realp"] = fetch_furka_timetable("8505165")
