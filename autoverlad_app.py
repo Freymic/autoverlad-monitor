@@ -45,11 +45,12 @@ if not df.empty:
                 axis=alt.Axis(
                     format='%H:00', 
                     title="Uhrzeit (CET)",
-                    # Erzwingt exakt jede Stunde eine Markierung
-                    tickCount='hour', 
-                    labelAngle=-45
+                    # Das erzwingt exakt EINEN Tick pro Stunde
+                    tickCount={'interval': 'hour', 'step': 1},
+                    labelAngle=-45,
+                    grid=True
                 )),
-        y=alt.Y('minutes:Q', title="Wartezeit (Min)"), # Spaltenname prüfen!
+        y=alt.Y('minutes:Q', title="Wartezeit (Min)"),
         color=alt.Color('station:N', title="Station"),
         tooltip=[
             alt.Tooltip('timestamp:T', format='%H:%M', title='Zeit'),
