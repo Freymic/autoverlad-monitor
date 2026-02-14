@@ -20,27 +20,14 @@ def init_db():
     conn.close()
 
 def parse_time_to_minutes(time_str):
-    """Wandelt Texte wie '1 Std 20 Min' oder '15 Min' in reine Minuten um."""
-    if not time_str or "Keine" in time_str:
+    if not time_str:
         return 0
-    
-    total_minutes = 0
-    # Suche nach Stunden
-    hours_match = re.search(r'(\d+)\s*Stunde', time_str)
-    if hours_match:
-        total_minutes += int(hours_match.group(1)) * 60
-    
-    # Suche nach Minuten
-    minutes_match = re.search(r'(\d+)\s*Minute', time_str)
-    if minutes_match:
-        total_minutes += int(minutes_match.group(1))
-    
-    # Fallback: Nur Zahlen extrahieren, falls kein Schlagwort gefunden wurde
-    if total_minutes == 0:
-        digits = ''.join(filter(str.isdigit, time_str))
-        total_minutes = int(digits) if digits else 0
-        
-    return total_minutes
+    # Erkennt "Keine", "No waiting", etc. als 0
+    if any(word in time_str.lower() for word in ["keine", "no", "none"]):
+        return 0
+    # Extrahiert alle Ziffern (z.B. "15 Min" -> 15)
+    digits = ''.join(filter(str.isdigit, time_str))
+    return int(digits) if digits else 0
 
 def save_to_db(data):
     """Speichert die Daten mit Schweizer Zeitstempel."""
