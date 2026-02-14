@@ -23,65 +23,49 @@ save_to_db(data)
 st.title("🏔️ Autoverlad Live-Monitor")
 
 # --- 1. METRIKEN ---
-cols = st.columns(len(data))
+cols = st.columns(4)
 for i, (name, d) in enumerate(data.items()):
-    cols[i].metric(label=name, value=f"{d['min']} Min")
+    cols[i % 4].metric(label=name, value=f"{d['min']} Min")
 
-# --- 2. DATEN LADEN (Global definiert, um NameError zu vermeiden) ---
+# --- 2. DATEN LADEN ---
 with sqlite3.connect(DB_NAME) as conn:
-    # Zeitfenster für den Chart berechnen (letzte 24h)
     cutoff_24h = (datetime.now(CH_TZ) - pd.Timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S')
-    
-    # Diagramm-Daten (24h)
     df_chart = pd.read_sql_query(f"SELECT * FROM stats WHERE timestamp >= '{cutoff_24h}' ORDER BY timestamp ASC", conn)
-    
-    # Historie-Daten (Alles für Debug)
     df_history = pd.read_sql_query("SELECT * FROM stats ORDER BY timestamp DESC", conn)
 
 # --- 3. TREND CHART ---
 st.subheader("📈 24h Trend")
 
 if not df_chart.empty:
-    # 1. DATEN-REINIGUNG (Das "Sicherheitsnetz")
+    # Daten-Vorbereitung für Altair
     df_plot = df_chart.copy()
-    
-    # Sicherstellen, dass timestamp ein echtes Datum ohne Zeitzonen-Konflikt ist
     df_plot['timestamp'] = pd.to_datetime(df_plot['timestamp']).dt.tz_localize(None)
-    
-    # Sicherstellen, dass minutes eine echte Zahl ist
     df_plot['minutes'] = pd.to_numeric(df_plot['minutes'], errors='coerce').fillna(0).astype(int)
     
-    # 2. CHART DEFINITION
     chart = alt.Chart(df_plot).mark_line(
         interpolate='monotone', 
         size=3, 
-        point=True  # Zeigt Punkte, falls noch keine Linie möglich ist
+        point=True  # Wichtig: Zeigt Punkte auch wenn die Linie flach bei 0 liegt
     ).encode(
         x=alt.X('timestamp:T', 
                 title="Uhrzeit (CET)",
-                axis=alt.Axis(
-                    format='%H:%M', 
-                    tickCount='hour', 
-                    labelAngle=-45
-                )),
+                axis=alt.Axis(format='%H:%M', tickCount='hour', labelAngle=-45)),
         y=alt.Y('minutes:Q', 
                 title="Wartezeit (Minuten)",
-                scale=alt.Scale(domainMin=0, nice=True)), # Startet immer bei 0
-        color=alt.Color('station:N', title="Station", scale=alt.Scale(scheme='category10')),
+                scale=alt.Scale(domainMin=0, domainMax=60)), # Skala bis 60, damit 0-Linie sichtbar ist
+        color=alt.Color('station:N', title="Station"),
         tooltip=[
             alt.Tooltip('timestamp:T', format='%H:%M', title='Zeit'),
             alt.Tooltip('station:N', title='Station'),
             alt.Tooltip('minutes:Q', title='Wartezeit (Min)')
         ]
-    ).properties(
-        height=400
-    ).interactive()
+    ).properties(height=400).interactive()
     
     st.altair_chart(chart, use_container_width=True)
 else:
-    st.info("Noch keine Daten für die letzten 2
+    st.info("Noch keine Daten für die letzten 24h vorhanden. Die ersten Punkte erscheinen im nächsten 5-Minuten-Raster.")
 
-# --- 4. DEBUG BEREICH (NameError Fix) ---
+# --- 4. DEBUG BEREICH ---
 st.markdown("---")
 with st.expander("🛠️ Debug Informationen"):
     tab1, tab2 = st.tabs(["JSON Rohdaten", "Datenbank Historie"])
@@ -91,8 +75,8 @@ with st.expander("🛠️ Debug Informationen"):
         st.json(data)
         
     with tab2:
-        # df_history ist jetzt sicher definiert
-        st.write(f"Gesamtanzahl Einträge in der Datenbank: {len(df_history)}")
+        # Sicherstellen, dass df_history existiert (behebt NameError)
+        st.write(f"Einträge in der Datenbank: {len(df_history)}")
         st.dataframe(df_history, use_container_width=True)
 
-st.caption(f"Letztes Update: {datetime.now(CH_TZ).strftime('%H:%M:%S')} | Raster: 5 Min")
+st.caption(f"Letztes Update: {datetime.now(CH_TZ).strftime('%H:%M:%S')} | Intervall: 5 Min")
