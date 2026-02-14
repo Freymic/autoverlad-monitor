@@ -1,15 +1,16 @@
 import requests
 from bs4 import BeautifulSoup
+import xml.etree.ElementTree as ET
+import re
 import sqlite3
 from datetime import datetime
 import pytz
 
-# Konstanten (Wichtig für den Import in autoverlad_app.py)
+# Konstanten für die App (Wichtig für image_8d7123.png)
 DB_NAME = 'autoverlad.db'
 CH_TZ = pytz.timezone('Europe/Zurich')
 
 def init_db():
-    """Erstellt die Tabelle 'stats', die pandas sucht."""
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS stats
@@ -18,7 +19,6 @@ def init_db():
     conn.close()
 
 def parse_time_to_minutes(time_str):
-    """Extrahiert Zahlen aus dem Text (z.B. '30 Min' -> 30)."""
     if not time_str or "Keine" in time_str:
         return 0
     digits = ''.join(filter(str.isdigit, time_str))
@@ -28,7 +28,6 @@ def parse_time_to_minutes(time_str):
         return 0
 
 def save_to_db(data):
-    """Speichert die Ergebnisse in der Datenbank."""
     try:
         conn = sqlite3.connect(DB_NAME)
         c = conn.cursor()
@@ -38,58 +37,67 @@ def save_to_db(data):
                       (timestamp, station, info.get('min', 0), info.get('raw', '')))
         conn.commit()
         conn.close()
-    except Exception as e:
-        print(f"DB Error: {e}")
+    except:
+        pass
 
 def fetch_all_data():
-    """Kombiniert Furka-API und Lötschberg-Scraping."""
     results = {}
     
-    # --- 1. FURKA LOGIK (Wiederhergestellt) ---
+    # --- 1. FURKA LOGIK (Deine RSS-Version) ---
     try:
-        f_url = "https://www.matterhorngotthardbahn.ch/api/autoverlad/waiting-times"
-        f_res = requests.get(f_url, timeout=10).json()
-        for item in f_res:
-            # Nutzt exakt die Keys 'station' und 'waitingTimeMin'
-            name = item.get('station')
-            wait = item.get('waitingTimeMin', 0)
-            results[name] = {
-                "min": wait,
-                "raw": f"Keine Wartezeit {name}." if wait == 0 else f"{wait} Min. Wartezeit"
-            }
-    except:
-        results["Realp"] = {"min": 0, "raw": "Keine Info"}
-        results["Oberwald"] = {"min": 0, "raw": "Keine Info"}
+        f_resp = requests.get("https://mgb-prod.oevfahrplan.ch/incident-manager-api/incidentmanager/rss?publicId=av_furka&lang=de", timeout=10)
+        f_resp.encoding = 'utf-8'
+        root = ET.fromstring(f_resp.content)
+        
+        # Standardwerte, falls nichts im Feed steht
+        results["Oberwald"] = {"min": 0, "raw": "Keine Wartezeit Oberwald."}
+        results["Realp"] = {"min": 0, "raw": "Keine Wartezeit Realp."}
+        
+        for item in root.findall('.//item'):
+            title = item.find('title').text if item.find('title') is not None else ""
+            desc = item.find('description').text if item.find('description') is not None else ""
+            full = f"{title} {desc}"
+            
+            # Zeit-Extraktion aus deinem Code
+            m = re.search(r'(\d+)\s*Minute', full)
+            h = re.search(r'(\d+)\s*Stunde', full)
+            val = (int(h.group(1))*60 if h else int(m.group(1)) if m else 0)
+            
+            raw_text = desc if desc else "Keine Wartezeit."
+            
+            if "Oberwald" in full:
+                results["Oberwald"] = {"min": val, "raw": raw_text}
+            if "Realp" in full:
+                results["Realp"] = {"min": val, "raw": raw_text}
+    except Exception as e:
+        print(f"Furka RSS Fehler: {e}")
 
-    # --- 2. LÖTSCHBERG LOGIK (Robustes Scraping) ---
+    # --- 2. LÖTSCHBERG LOGIK (Web Scraping) ---
     try:
         l_url = "https://www.bls.ch/de/fahren/autoverlad/loetschberg/betriebslage"
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0"}
         l_res = requests.get(l_url, headers=headers, timeout=15)
         soup = BeautifulSoup(l_res.text, 'html.parser')
         
-        # Gezielt nach stName und stInfo suchen
-        names = [n.get_text(strip=True) for n in soup.find_all('div', class_='stName')]
-        infos = [i.get_text(strip=True) for i in soup.find_all('div', class_='stInfo')]
-        
-        # Die Listen zusammenführen
-        for name, info in zip(names, infos):
-            if "Kandersteg" in name or "Goppenstein" in name:
-                results[name] = {
-                    "min": parse_time_to_minutes(info),
-                    "raw": info if info else "Keine Wartezeiten"
-                }
+        # Suche nach stName und stInfo (siehe image_8ceafc.png)
+        lines = soup.find_all('div', class_='stLine')
+        for line in lines:
+            n_div = line.find('div', class_='stName')
+            i_div = line.find('div', class_='stInfo')
+            if n_div and i_div:
+                name = n_div.get_text(strip=True)
+                info = i_div.get_text(strip=True)
+                results[name] = {"min": parse_time_to_minutes(info), "raw": info}
     except:
         pass
 
-    # Falls Lötschberg fehlte, mit Standard füllen
-    if "Kandersteg" not in results:
-        results["Kandersteg"] = {"min": 0, "raw": "Warte auf Daten..."}
-    if "Goppenstein" not in results:
-        results["Goppenstein"] = {"min": 0, "raw": "Warte auf Daten..."}
+    # Sicherstellen, dass die Keys für die App existieren
+    for s in ["Kandersteg", "Goppenstein"]:
+        if s not in results:
+            results[s] = {"min": 0, "raw": "Keine Info"}
 
     save_to_db(results)
     return results
 
-# Alias für die App-Importe
+# Alias für die App
 get_quantized_data = fetch_all_data
