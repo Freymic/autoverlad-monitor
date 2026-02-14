@@ -7,32 +7,38 @@ import sqlite3
 from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
-# --- 1. KONFIGURATION & AUTO-REFRESH ---
-st.set_page_config(page_title="Furka Live-Check Pro", layout="wide")
+# --- 1. CONFIG & REFRESH ---
+st.set_page_config(page_title="Furka DEV - 24h Trend", layout="wide")
 
-# Aktualisiert die gesamte App alle 5 Minuten automatisch
-st_autorefresh(interval=5 * 60 * 1000, key="furka_auto_update")
+# Autorefresh alle 5 Minuten
+st_autorefresh(interval=5 * 60 * 1000, key="furka_dev_refresh")
 
-# --- 2. DATENBANK LOGIK (Persistenz für Trend) ---
+# --- 2. DATABASE LOGIK (2 Wochen Speicher) ---
+DB_NAME = 'furka_dev_v4.db'
+
 def init_db():
-    conn = sqlite3.connect('furka_v3.db')
+    conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS stats 
-                 (timestamp DATETIME, oberwald INTEGER, realp INTEGER, raw_text TEXT)''')
+                 (timestamp DATETIME, oberwald_min INTEGER, realp_min INTEGER, 
+                  raw_ow TEXT, raw_re TEXT)''')
     conn.commit()
     conn.close()
 
-def update_database(ow_min, re_min, raw_msg):
-    conn = sqlite3.connect('furka_v3.db')
+def save_to_db(ow_min, re_min, ow_raw, re_raw):
+    conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("INSERT INTO stats VALUES (?, ?, ?, ?)", (datetime.now(), ow_min, re_min, raw_msg))
-    # Daten älter als 24h löschen, um DB klein zu halten
-    c.execute("DELETE FROM stats WHERE timestamp < ?", (datetime.now() - timedelta(hours=24),))
+    # Speichern
+    c.execute("INSERT INTO stats VALUES (?, ?, ?, ?, ?)", 
+              (datetime.now(), ow_min, re_min, ow_raw, re_raw))
+    # Cleanup: Alles älter als 14 Tage löschen
+    c.execute("DELETE FROM stats WHERE timestamp < ?", 
+              (datetime.now() - timedelta(days=14),))
     conn.commit()
     conn.close()
 
-def get_history_df(hours=6):
-    conn = sqlite3.connect('furka_v3.db')
+def load_data(hours=24):
+    conn = sqlite3.connect(DB_NAME)
     cutoff = datetime.now() - timedelta(hours=hours)
     df = pd.read_sql_query("SELECT * FROM stats WHERE timestamp > ? ORDER BY timestamp ASC", 
                            conn, params=(cutoff,))
@@ -41,73 +47,75 @@ def get_history_df(hours=6):
         df['timestamp'] = pd.to_datetime(df['timestamp'])
     return df
 
-# --- 3. DATENABFRAGE (RSS statt Scraping) ---
-def fetch_mgb_rss():
+# --- 3. RSS LOGIK ---
+def fetch_furka_rss():
     url = "https://mgb-prod.oevfahrplan.ch/incident-manager-api/incidentmanager/rss?publicId=av_furka&lang=de"
+    res = {
+        "Oberwald": {"min": 0, "raw": "Keine Daten"},
+        "Realp": {"min": 0, "raw": "Keine Daten"}
+    }
     try:
-        # User-Agent imitieren, um Blockaden vorzubeugen
-        resp = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        resp = requests.get(url, timeout=10)
         resp.encoding = 'utf-8'
         if resp.status_code == 200:
             root = ET.fromstring(resp.content)
-            items = root.findall('.//item')
-            res = {"Oberwald": 0, "Realp": 0, "msg": "Keine besonderen Vorkommnisse"}
-            
-            for item in items:
+            for item in root.findall('.//item'):
                 title = item.find('title').text
                 desc = item.find('description').text
                 full = f"{title} {desc}"
                 
-                # Richtung bestimmen
+                # XML Schnipsel für Debug speichern
+                raw_xml_snippet = ET.tostring(item, encoding='unicode')
+                
                 direction = "Oberwald" if "Oberwald" in full else "Realp" if "Realp" in full else None
                 if direction:
-                    # Zeit extrahieren (Stunden oder Minuten)
                     std = re.search(r'(\d+)\s*Stunde', full)
                     mn  = re.search(r'(\d+)\s*Minute', full)
                     val = int(std.group(1)) * 60 if std else int(mn.group(1)) if mn else 0
-                    res[direction] = val
-                    res["msg"] = title
-            return res, resp.text
+                    res[direction]["min"] = val
+                    res[direction]["raw"] = raw_xml_snippet
+            return res
     except Exception as e:
-        st.error(f"RSS Fehler: {e}")
-    return None, ""
+        st.error(f"Fehler beim Abruf: {e}")
+    return res
 
-# --- 4. HAUPT-APP ---
+# --- 4. APP FLOW ---
 init_db()
-st.title("🏔️ Furka Autoverlad: Live-Status & Trend")
+data = fetch_furka_rss()
 
-# Daten abrufen
-current_data, raw_xml = fetch_mgb_rss()
+# Speichern der neuen Daten
+save_to_db(data["Oberwald"]["min"], data["Realp"]["min"], 
+           data["Oberwald"]["raw"], data["Realp"]["raw"])
 
-if current_data:
-    # In DB speichern für den Trend
-    update_database(current_data["Oberwald"], current_data["Realp"], current_data["msg"])
-    
-    # Metriken anzeigen
-    c1, c2 = st.columns(2)
-    with c1:
-        st.metric("📍 Oberwald", f"{current_data['Oberwald']} min", 
-                  delta="Normalbetrieb" if current_data['Oberwald'] == 0 else "Stau")
-    with c2:
-        st.metric("📍 Realp", f"{current_data['Realp']} min", 
-                  delta="Normalbetrieb" if current_data['Realp'] == 0 else "Stau", delta_color="inverse")
+st.title("🏔️ Furka Monitor (Development Branch)")
 
-# --- 5. TREND-VISUALISIERUNG (6h) ---
-df_hist = get_history_df(6)
-if not df_hist.empty:
-    st.subheader("📈 Wartezeit-Trend (letzte 6 Stunden)")
-    # Chart-Daten aufbereiten
-    chart_df = df_hist.copy()
-    chart_df = chart_df.rename(columns={"timestamp": "Zeit", "oberwald": "Oberwald", "realp": "Realp"})
+# Metriken
+c1, c2 = st.columns(2)
+c1.metric("Oberwald", f"{data['Oberwald']['min']} Min")
+c2.metric("Realp", f"{data['Realp']['min']} Min")
+
+# --- 5. 24h TREND DIAGRAMM ---
+df_24h = load_data(hours=24)
+if not df_24h.empty:
+    st.subheader("📈 Trend letzte 24 Stunden")
+    chart_df = df_24h.rename(columns={"timestamp": "Zeit", "oberwald_min": "Oberwald", "realp_min": "Realp"})
     st.line_chart(chart_df.set_index("Zeit")[["Oberwald", "Realp"]])
 
-# --- 6. DEBUG & INFO ---
-with st.expander("🛠️ Debug-Informationen (RSS & DB)"):
-    st.write(f"Letztes Update: {datetime.now().strftime('%H:%M:%S')}")
-    if current_data:
-        st.write("**Aktuelle Meldung:**", current_data["msg"])
-    if raw_xml:
-        st.code(raw_xml, language="xml")
-    st.dataframe(df_hist.tail(10))
+# --- 6. DEBUG ACCORDION ---
+with st.expander("🛠️ Debug Informationen (RSS & Datenbank)"):
+    tab1, tab2 = st.tabs(["Raw RSS Updates", "Datenbank (letzte 24h)"])
+    
+    with tab1:
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.write("**Letztes RSS Oberwald:**")
+            st.code(data["Oberwald"]["raw"], language="xml")
+        with col_b:
+            st.write("**Letztes RSS Realp:**")
+            st.code(data["Realp"]["raw"], language="xml")
+            
+    with tab2:
+        st.write("**Einträge der letzten 24h (Rohdaten):**")
+        st.dataframe(df_24h.sort_values(by="timestamp", ascending=False), use_container_width=True)
 
-st.caption("Datenquelle: MGB RSS Incident Manager. Automatisches Update alle 5 Min.")
+st.caption(f"Letzter Check: {datetime.now().strftime('%H:%M:%S')} | Speicher: 14 Tage")
