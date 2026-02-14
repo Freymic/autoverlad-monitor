@@ -17,35 +17,52 @@ def parse_time_to_minutes(text):
     return (int(std.group(1)) * 60 if std else 0) + (int(mn.group(1)) if mn else 0)
 
 def fetch_all_data():
-    res = {s: {"min": 0, "raw": "Keine Info"} for s in ["Oberwald", "Realp", "Kandersteg", "Goppenstein"]}
+    # Standardwerte setzen
+    res = {s: {"min": 0, "raw": "Warte auf Daten..."} for s in ["Oberwald", "Realp", "Kandersteg", "Goppenstein"]}
+    
     try:
-        # --- FURKA (MGB) bleibt wie gehabt ---
-        # ... (dein bestehender Furka Code) ...
-
-        # --- LÖTSCHBERG (BLS) - Gezielte Text-Extraktion ---
+        # --- LÖTSCHBERG (BLS) ---
         l_resp = requests.get("https://www.bls.ch/de/fahren/autoverlad/betriebslage", timeout=10, headers={"User-Agent":"Mozilla/5.0"})
+        l_resp.encoding = 'utf-8'
         soup = BeautifulSoup(l_resp.text, 'html.parser')
         
-        # Suche nach den Containern aus deinem Screenshot
-        delay_elements = soup.find_all("div", class_="stLine")
+        # Wir suchen gezielt nach der Struktur aus deinem Screenshot
+        # Falls die Klasse 'stLine' nicht gefunden wird, nutzen wir einen CSS-Selektor als Backup
+        lines = soup.find_all("div", class_="stLine")
         
-        for element in delay_elements:
-            name_div = element.find("div", class_="stName")
-            info_div = element.find("div", class_="stInfo")
+        for line in lines:
+            name_div = line.find("div", class_="stName")
+            info_div = line.find("div", class_="stInfo")
             
             if name_div and info_div:
-                st_name = name_div.get_text(strip=True)
-                st_info = info_div.get_text(strip=True) # Extrahiert z.B. "Keine Wartezeiten"
+                name = name_div.get_text(strip=True)
+                info = info_div.get_text(strip=True) # Hier steht dann "Keine Wartezeiten"
                 
-                if st_name in ["Kandersteg", "Goppenstein"]:
-                    val = parse_time_to_minutes(st_info)
-                    # Wir speichern jetzt den 1:1 Text statt des HTML-Codes
-                    res[st_name] = {
-                        "min": val, 
-                        "raw": st_info  # Hier steht jetzt "Keine Wartezeiten"
-                    }
+                if name in res:
+                    res[name]["min"] = parse_time_to_minutes(info)
+                    res[name]["raw"] = info  # Speichert 1:1 "Keine Wartezeiten"
+
+        # --- FURKA (MGB) ---
+        f_resp = requests.get("https://mgb-prod.oevfahrplan.ch/incident-manager-api/incidentmanager/rss?publicId=av_furka&lang=de", timeout=10)
+        f_resp.encoding = 'utf-8'
+        root = ET.fromstring(f_resp.content)
+        for item in root.findall('.//item'):
+            title = item.find('title').text or ""
+            desc = item.find('description').text or ""
+            full_text = f"{title} {desc}"
+            
+            # Wir nehmen den Titel als 1:1 Info für Furka
+            if "Oberwald" in full_text:
+                res["Oberwald"]["min"] = parse_time_to_minutes(full_text)
+                res["Oberwald"]["raw"] = title
+            if "Realp" in full_text:
+                res["Realp"]["min"] = parse_time_to_minutes(full_text)
+                res["Realp"]["raw"] = title
+
     except Exception as e:
-        print(f"Fetch Error: {e}")
+        # Falls ein Fehler auftritt, schreiben wir ihn in die Raw-Info zum Debuggen
+        for s in res: res[s]["raw"] = f"Fehler: {str(e)}"
+        
     return res
 
 def init_db():
