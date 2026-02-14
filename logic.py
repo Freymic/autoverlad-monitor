@@ -2,12 +2,25 @@ import requests
 from bs4 import BeautifulSoup
 import sqlite3
 from datetime import datetime
+import pytz
+
+# Konstanten für die App
+DB_NAME = 'autoverlad.db'
+CH_TZ = pytz.timezone('Europe/Zurich')
+
+def init_db():
+    """Erstellt die Datenbank-Struktur, falls sie noch nicht existiert."""
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS waiting_times
+                 (timestamp DATETIME, station TEXT, minutes INTEGER, raw_text TEXT)''')
+    conn.commit()
+    conn.close()
 
 def parse_time_to_minutes(time_str):
-    """Konvertiert Texte wie '30 Min' oder 'Keine Wartezeit' in Integer-Minuten."""
+    """Wandelt Texte wie '30 Min' oder 'Keine Wartezeit' in Zahlen um."""
     if not time_str or "Keine" in time_str:
         return 0
-    # Extrahiert alle Ziffern aus dem String
     digits = ''.join(filter(str.isdigit, time_str))
     try:
         return int(digits) if digits else 0
@@ -15,26 +28,21 @@ def parse_time_to_minutes(time_str):
         return 0
 
 def save_to_db(data):
-    """Speichert die aktuellen Werte in der lokalen SQLite Datenbank."""
+    """Speichert die kombinierten Daten in die SQLite DB."""
     try:
-        conn = sqlite3.connect('autoverlad.db')
+        conn = sqlite3.connect(DB_NAME)
         c = conn.cursor()
-        # Tabelle anlegen, falls sie noch nicht existiert
-        c.execute('''CREATE TABLE IF NOT EXISTS waiting_times
-                     (timestamp DATETIME, station TEXT, minutes INTEGER, raw_text TEXT)''')
-        
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        timestamp = datetime.now(CH_TZ).strftime('%Y-%m-%d %H:%M:%S')
         for station, info in data.items():
             c.execute("INSERT INTO waiting_times VALUES (?, ?, ?, ?)",
                       (timestamp, station, info['min'], info['raw']))
-        
         conn.commit()
         conn.close()
     except Exception as e:
         print(f"Datenbankfehler: {e}")
 
 def fetch_furka_data():
-    """Holt Furka-Daten via API."""
+    """API Abfrage für Furka (Realp & Oberwald)."""
     url = "https://www.matterhorngotthardbahn.ch/api/autoverlad/waiting-times"
     try:
         response = requests.get(url, timeout=10)
@@ -52,13 +60,14 @@ def fetch_furka_data():
         return {}
 
 def fetch_loetschberg_data():
-    """Holt Lötschberg-Daten via Web-Scraping (BLS)."""
+    """Web-Scraping für Lötschberg (Kandersteg & Goppenstein)."""
     url = "https://www.bls.ch/de/fahren/autoverlad/loetschberg/betriebslage"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124"}
     try:
         response = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(response.text, 'html.parser')
         results = {}
+        # Nutzt die Klassen aus deinem Screenshot (Image 8ceafc)
         stations = soup.find_all('div', class_='stLine')
         for station in stations:
             name_div = station.find('div', class_='stName')
@@ -74,16 +83,13 @@ def fetch_loetschberg_data():
     except:
         return {}
 
+def fetch_all_data():
+    """Zentraler Aufruf für beide Pässe."""
+    data_f = fetch_furka_data()
+    data_l = fetch_loetschberg_data()
+    combined = {**data_f, **data_l}
+    return combined
+
 def get_quantized_data():
-    """Hauptfunktion für Streamlit: Holt Daten und speichert sie."""
-    data_furka = fetch_furka_data()
-    data_loetschberg = fetch_loetschberg_data()
-    
-    # Kombinieren
-    combined_data = {**data_furka, **data_loetschberg}
-    
-    # Speichern für die Historie-Grafiken
-    if combined_data:
-        save_to_db(combined_data)
-        
-    return combined_data
+    """Hilfsfunktion, falls die App diesen Namen statt fetch_all_data nutzt."""
+    return fetch_all_data()
