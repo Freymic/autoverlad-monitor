@@ -11,11 +11,11 @@ DB_NAME = 'autoverlad.db'
 CH_TZ = pytz.timezone('Europe/Zurich')
 
 def init_db():
-    """Erstellt die Tabelle 'stats', die pandas sucht (image_8d6600.jpg)."""
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
+    # Wir nennen die Spalte 'wait_time', um Verwechslungen mit dem Wort 'minutes' zu vermeiden
     c.execute('''CREATE TABLE IF NOT EXISTS stats
-                 (timestamp DATETIME, station TEXT, minutes INTEGER, raw_text TEXT)''')
+                 (timestamp DATETIME, station TEXT, wait_time INTEGER, raw_text TEXT)''')
     conn.commit()
     conn.close()
 
@@ -30,14 +30,14 @@ def parse_time_to_minutes(time_str):
         return 0
 
 def save_to_db(data):
-    """Speichert Ergebnisse in der Tabelle 'stats' (image_8d6600.jpg)."""
     try:
         conn = sqlite3.connect(DB_NAME)
         c = conn.cursor()
         timestamp = datetime.now(CH_TZ).strftime('%Y-%m-%d %H:%M:%S')
         for station, info in data.items():
+            # Wir speichern den Wert explizit in 'wait_time'
             c.execute("INSERT INTO stats VALUES (?, ?, ?, ?)",
-                      (timestamp, station, info.get('min', 0), info.get('raw', '')))
+                      (timestamp, station, int(info.get('min', 0)), info.get('raw', '')))
         conn.commit()
         conn.close()
     except Exception as e:
