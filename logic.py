@@ -1,86 +1,89 @@
 import requests
-import xml.etree.ElementTree as ET
-import re
-import sqlite3
-import pandas as pd
-import pytz
-from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
+import sqlite3
+from datetime import datetime
 
-DB_NAME = 'autoverlad_final_v3.db'
-CH_TZ = pytz.timezone('Europe/Zurich')
-
-def parse_time_to_minutes(text):
-    if not text: return 0
-    std = re.search(r'(\d+)\s*Stunde', text, re.I)
-    mn = re.search(r'(\d+)\s*Minute', text, re.I)
-    return (int(std.group(1)) * 60 if std else 0) + (int(mn.group(1)) if mn else 0)
-
-def fetch_all_data():
-    res = {s: {"min": 0, "raw": "Warte auf Daten..."} for s in ["Oberwald", "Realp", "Kandersteg", "Goppenstein"]}
-    
+def parse_time_to_minutes(time_str):
+    """Konvertiert Texte wie '30 Min' oder 'Keine Wartezeit' in Integer-Minuten."""
+    if not time_str or "Keine" in time_str:
+        return 0
+    # Extrahiert alle Ziffern aus dem String
+    digits = ''.join(filter(str.isdigit, time_str))
     try:
-        # 1. LÖTSCHBERG (BLS) - Jetzt mit tieferer Suche
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        l_resp = requests.get("https://www.bls.ch/de/fahren/autoverlad/betriebslage", timeout=15, headers=headers)
-        l_resp.encoding = 'utf-8'
-        soup = BeautifulSoup(l_resp.text, 'html.parser')
-        
-        # Wir suchen alle Container mit der Klasse 'stLine'
-        # Wir nutzen .select(), das ist bei komplexen Klassen-Kombinationen oft treffsicherer
-        lines = soup.select("div.stLine")
-        
-        if not lines:
-            # Plan B: Falls stLine nicht direkt gefunden wird, suchen wir nach den Namen
-            for s_name in ["Kandersteg", "Goppenstein"]:
-                name_tag = soup.find(string=re.compile(s_name))
-                if name_tag:
-                    # Wir hangeln uns vom Namen zum Info-Feld
-                    parent = name_tag.find_parent("div", class_="stLine")
-                    if parent:
-                        info_div = parent.find("div", class_="stInfo")
-                        if info_div:
-                            txt = info_div.get_text(strip=True)
-                            res[s_name] = {"min": parse_time_to_minutes(txt), "raw": txt}
-        else:
-            for line in lines:
-                name_div = line.find("div", class_="stName")
-                info_div = line.find("div", class_="stInfo")
-                if name_div and info_div:
-                    name = name_div.get_text(strip=True)
-                    info = info_div.get_text(strip=True)
-                    if name in res:
-                        res[name] = {"min": parse_time_to_minutes(info), "raw": info}
+        return int(digits) if digits else 0
+    except ValueError:
+        return 0
 
-        # 2. FURKA (MGB) - Dein funktionierender Teil
-        f_resp = requests.get("https://mgb-prod.oevfahrplan.ch/incident-manager-api/incidentmanager/rss?publicId=av_furka&lang=de", timeout=10)
-        root = ET.fromstring(f_resp.content)
-        for item in root.findall('.//item'):
-            title = item.find('title').text or ""
-            for s in ["Oberwald", "Realp"]:
-                if s in title:
-                    res[s] = {"min": parse_time_to_minutes(title), "raw": title}
-
+def save_to_db(data):
+    """Speichert die aktuellen Werte in der lokalen SQLite Datenbank."""
+    try:
+        conn = sqlite3.connect('autoverlad.db')
+        c = conn.cursor()
+        # Tabelle anlegen, falls sie noch nicht existiert
+        c.execute('''CREATE TABLE IF NOT EXISTS waiting_times
+                     (timestamp DATETIME, station TEXT, minutes INTEGER, raw_text TEXT)''')
+        
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        for station, info in data.items():
+            c.execute("INSERT INTO waiting_times VALUES (?, ?, ?, ?)",
+                      (timestamp, station, info['min'], info['raw']))
+        
+        conn.commit()
+        conn.close()
     except Exception as e:
-        # Fehler direkt in die Raw-Info schreiben für das Debugging
-        for s in ["Kandersteg", "Goppenstein"]:
-            res[s]["raw"] = f"Error: {str(e)[:50]}"
-            
-    return res
-    
-def init_db():
-    with sqlite3.connect(DB_NAME) as conn:
-        conn.execute('''CREATE TABLE IF NOT EXISTS stats 
-                        (timestamp DATETIME, station TEXT, minuten INTEGER, raw_info TEXT)''')
+        print(f"Datenbankfehler: {e}")
 
-def save_to_db(data_dict):
-    now_ch = datetime.now(pytz.utc).astimezone(CH_TZ)
-    rounded_minute = (now_ch.minute // 5) * 5
-    ts_rounded = now_ch.replace(minute=rounded_minute, second=0, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
-    with sqlite3.connect(DB_NAME) as conn:
-        exists = conn.execute("SELECT 1 FROM stats WHERE timestamp = ? LIMIT 1", (ts_rounded,)).fetchone()
-        if not exists:
-            for station, info in data_dict.items():
-                conn.execute("INSERT INTO stats VALUES (?, ?, ?, ?)", (ts_rounded, station, info['min'], info['raw']))
-            return ts_rounded
-    return None
+def fetch_furka_data():
+    """Holt Furka-Daten via API."""
+    url = "https://www.matterhorngotthardbahn.ch/api/autoverlad/waiting-times"
+    try:
+        response = requests.get(url, timeout=10)
+        data = response.json()
+        results = {}
+        for item in data:
+            station = item.get("station")
+            wait_min = item.get("waitingTimeMin", 0)
+            results[station] = {
+                "min": wait_min,
+                "raw": f"{wait_min} Min." if wait_min > 0 else "Keine Wartezeit"
+            }
+        return results
+    except:
+        return {}
+
+def fetch_loetschberg_data():
+    """Holt Lötschberg-Daten via Web-Scraping (BLS)."""
+    url = "https://www.bls.ch/de/fahren/autoverlad/loetschberg/betriebslage"
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124"}
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        results = {}
+        stations = soup.find_all('div', class_='stLine')
+        for station in stations:
+            name_div = station.find('div', class_='stName')
+            info_div = station.find('div', class_='stInfo')
+            if name_div and info_div:
+                name = name_div.get_text(strip=True)
+                info_text = info_div.get_text(strip=True)
+                results[name] = {
+                    "min": parse_time_to_minutes(info_text),
+                    "raw": info_text
+                }
+        return results
+    except:
+        return {}
+
+def get_quantized_data():
+    """Hauptfunktion für Streamlit: Holt Daten und speichert sie."""
+    data_furka = fetch_furka_data()
+    data_loetschberg = fetch_loetschberg_data()
+    
+    # Kombinieren
+    combined_data = {**data_furka, **data_loetschberg}
+    
+    # Speichern für die Historie-Grafiken
+    if combined_data:
+        save_to_db(combined_data)
+        
+    return combined_data
