@@ -32,31 +32,35 @@ for i, (name, d) in enumerate(data.items()):
 # --- 2. TREND CHART ---
 st.subheader("📈 24h Trend")
 with sqlite3.connect(DB_NAME) as conn:
-    # Wir laden die Daten aus der Spalte 'minutes'
+    # Wir laden die Daten
     df = pd.read_sql_query("SELECT * FROM stats ORDER BY timestamp ASC", conn)
 
 if not df.empty:
-    # Fehlervermeidung beim Zeitformat
-    df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
-    df = df.dropna(subset=['timestamp'])
+    # EXPLIZITE KONVERTIERUNG: Das löst das leere Diagramm-Problem
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
     
-    # Der entscheidende Fix: Wir nutzen 'minutes' statt 'minuten'
+    # Altair Chart Definition
     chart = alt.Chart(df).mark_line(interpolate='monotone').encode(
         x=alt.X('timestamp:T', 
                 axis=alt.Axis(
                     format='%H:00', 
                     title="Uhrzeit (CET)",
-                    # Erzwingt die Anzeige für jede volle Stunde
-                    tickCount={'interval': 'hour', 'step': 1}
+                    # Erzwingt exakt jede Stunde eine Markierung
+                    tickCount='hour', 
+                    labelAngle=-45
                 )),
-        y=alt.Y('minutes:Q', title="Wartezeit (Min)"), # Hier lag der Fehler
-        color='station:N',
-        tooltip=['timestamp:T', 'station:N', 'minutes:Q']
+        y=alt.Y('minutes:Q', title="Wartezeit (Min)"), # Spaltenname prüfen!
+        color=alt.Color('station:N', title="Station"),
+        tooltip=[
+            alt.Tooltip('timestamp:T', format='%H:%M', title='Zeit'),
+            alt.Tooltip('station:N', title='Station'),
+            alt.Tooltip('minutes:Q', title='Minuten')
+        ]
     ).properties(height=400).interactive()
     
     st.altair_chart(chart, use_container_width=True)
 else:
-    st.info("Warte auf erste Datenpunkte für das Diagramm...")
+    st.info("Datenbank ist noch leer. Bitte warten, bis die ersten Datenpunkte geloggt wurden.")
 
 # --- 3. DEBUG BEREICH (Wieder eingebaut) ---
 st.markdown("---")
