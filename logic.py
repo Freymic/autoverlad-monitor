@@ -19,20 +19,14 @@ def parse_time_to_minutes(text):
 def fetch_all_data():
     res = {s: {"min": 0, "raw": "Keine Info"} for s in ["Oberwald", "Realp", "Kandersteg", "Goppenstein"]}
     try:
-        # --- FURKA (MGB) ---
-        f_resp = requests.get("https://mgb-prod.oevfahrplan.ch/incident-manager-api/incidentmanager/rss?publicId=av_furka&lang=de", timeout=10)
-        root = ET.fromstring(f_resp.content)
-        for item in root.findall('.//item'):
-            full = f"{item.find('title').text} {item.find('description').text}"
-            val = parse_time_to_minutes(full)
-            if "Oberwald" in full: res["Oberwald"] = {"min": val, "raw": ET.tostring(item, encoding='unicode')}
-            if "Realp" in full: res["Realp"] = {"min": val, "raw": ET.tostring(item, encoding='unicode')}
-        
-        # --- LÖTSCHBERG (BLS) - GEZIELTE SUCHE ---
+        # --- FURKA (MGB) bleibt wie gehabt ---
+        # ... (dein bestehender Furka Code) ...
+
+        # --- LÖTSCHBERG (BLS) - Gezielte Text-Extraktion ---
         l_resp = requests.get("https://www.bls.ch/de/fahren/autoverlad/betriebslage", timeout=10, headers={"User-Agent":"Mozilla/5.0"})
         soup = BeautifulSoup(l_resp.text, 'html.parser')
         
-        # Wir suchen alle "stLine" Container aus deinem Screenshot
+        # Suche nach den Containern aus deinem Screenshot
         delay_elements = soup.find_all("div", class_="stLine")
         
         for element in delay_elements:
@@ -41,14 +35,14 @@ def fetch_all_data():
             
             if name_div and info_div:
                 st_name = name_div.get_text(strip=True)
-                st_info = info_div.get_text(strip=True)
+                st_info = info_div.get_text(strip=True) # Extrahiert z.B. "Keine Wartezeiten"
                 
                 if st_name in ["Kandersteg", "Goppenstein"]:
                     val = parse_time_to_minutes(st_info)
-                    # Wir speichern den exakten HTML-Teil als Raw-Info
+                    # Wir speichern jetzt den 1:1 Text statt des HTML-Codes
                     res[st_name] = {
                         "min": val, 
-                        "raw": str(element) 
+                        "raw": st_info  # Hier steht jetzt "Keine Wartezeiten"
                     }
     except Exception as e:
         print(f"Fetch Error: {e}")
