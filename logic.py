@@ -17,48 +17,57 @@ def parse_time_to_minutes(text):
     return (int(std.group(1)) * 60 if std else 0) + (int(mn.group(1)) if mn else 0)
 
 def fetch_all_data():
-    # Initialisierung mit Platzhaltern
     res = {s: {"min": 0, "raw": "Warte auf Daten..."} for s in ["Oberwald", "Realp", "Kandersteg", "Goppenstein"]}
     
     try:
-        # --- LÖTSCHBERG (BLS) ---
-        l_resp = requests.get("https://www.bls.ch/de/fahren/autoverlad/betriebslage", timeout=10, headers={"User-Agent":"Mozilla/5.0"})
+        # 1. LÖTSCHBERG (BLS) - Jetzt mit tieferer Suche
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        l_resp = requests.get("https://www.bls.ch/de/fahren/autoverlad/betriebslage", timeout=15, headers=headers)
         l_resp.encoding = 'utf-8'
         soup = BeautifulSoup(l_resp.text, 'html.parser')
         
-        # Suche alle Zeilen (stLine) gemäß deinem Screenshot
-        lines = soup.find_all("div", class_="stLine")
+        # Wir suchen alle Container mit der Klasse 'stLine'
+        # Wir nutzen .select(), das ist bei komplexen Klassen-Kombinationen oft treffsicherer
+        lines = soup.select("div.stLine")
         
-        for line in lines:
-            # Suche Name und Info innerhalb der Zeile
-            name_div = line.find("div", class_="stName")
-            info_div = line.find("div", class_="stInfo")
-            
-            if name_div and info_div:
-                name = name_div.get_text(strip=True)
-                info = info_div.get_text(strip=True)
-                
-                # Nur Kandersteg und Goppenstein verarbeiten
-                if name in ["Kandersteg", "Goppenstein"]:
-                    res[name]["min"] = parse_time_to_minutes(info)
-                    res[name]["raw"] = info  # Speichert 1:1 "Keine Wartezeiten"
+        if not lines:
+            # Plan B: Falls stLine nicht direkt gefunden wird, suchen wir nach den Namen
+            for s_name in ["Kandersteg", "Goppenstein"]:
+                name_tag = soup.find(string=re.compile(s_name))
+                if name_tag:
+                    # Wir hangeln uns vom Namen zum Info-Feld
+                    parent = name_tag.find_parent("div", class_="stLine")
+                    if parent:
+                        info_div = parent.find("div", class_="stInfo")
+                        if info_div:
+                            txt = info_div.get_text(strip=True)
+                            res[s_name] = {"min": parse_time_to_minutes(txt), "raw": txt}
+        else:
+            for line in lines:
+                name_div = line.find("div", class_="stName")
+                info_div = line.find("div", class_="stInfo")
+                if name_div and info_div:
+                    name = name_div.get_text(strip=True)
+                    info = info_div.get_text(strip=True)
+                    if name in res:
+                        res[name] = {"min": parse_time_to_minutes(info), "raw": info}
 
-        # --- FURKA (MGB) ---
+        # 2. FURKA (MGB) - Dein funktionierender Teil
         f_resp = requests.get("https://mgb-prod.oevfahrplan.ch/incident-manager-api/incidentmanager/rss?publicId=av_furka&lang=de", timeout=10)
         root = ET.fromstring(f_resp.content)
         for item in root.findall('.//item'):
             title = item.find('title').text or ""
-            if "Oberwald" in title:
-                res["Oberwald"]["min"] = parse_time_to_minutes(title)
-                res["Oberwald"]["raw"] = title
-            elif "Realp" in title:
-                res["Realp"]["min"] = parse_time_to_minutes(title)
-                res["Realp"]["raw"] = title
+            for s in ["Oberwald", "Realp"]:
+                if s in title:
+                    res[s] = {"min": parse_time_to_minutes(title), "raw": title}
 
     except Exception as e:
-        print(f"Fetch Error: {e}")
-        
+        # Fehler direkt in die Raw-Info schreiben für das Debugging
+        for s in ["Kandersteg", "Goppenstein"]:
+            res[s]["raw"] = f"Error: {str(e)[:50]}"
+            
     return res
+    
 def init_db():
     with sqlite3.connect(DB_NAME) as conn:
         conn.execute('''CREATE TABLE IF NOT EXISTS stats 
