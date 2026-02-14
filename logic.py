@@ -30,14 +30,27 @@ def parse_time_to_minutes(time_str):
     return int(digits) if digits else 0
 
 def save_to_db(data):
-    """Speichert die Daten mit Schweizer Zeitstempel."""
+    """Speichert Daten nur im 5-Minuten-Raster, um Duplikate zu vermeiden."""
     try:
         conn = sqlite3.connect(DB_NAME)
         c = conn.cursor()
-        timestamp = datetime.now(CH_TZ).strftime('%Y-%m-%d %H:%M:%S')
+        
+        # Aktuelle Zeit holen
+        now = datetime.now(CH_TZ)
+        
+        # Minuten auf das letzte 5-Minuten-Intervall abrunden (z.B. 21:07 -> 21:05)
+        minute_quantized = (now.minute // 5) * 5
+        quantized_now = now.replace(minute=minute_quantized, second=0, microsecond=0)
+        timestamp_str = quantized_now.strftime('%Y-%m-%d %H:%M:%S')
+        
         for station, info in data.items():
-            c.execute("INSERT INTO stats VALUES (?, ?, ?, ?)",
-                      (timestamp, station, info.get('min', 0), info.get('raw', '')))
+            # "INSERT OR IGNORE" in Kombination mit einem UNIQUE Constraint wäre ideal, 
+            # aber hier prüfen wir manuell, ob der Eintrag für diese Station und Zeit schon existiert:
+            c.execute("SELECT 1 FROM stats WHERE timestamp = ? AND station = ?", (timestamp_str, station))
+            if not c.fetchone():
+                c.execute("INSERT INTO stats VALUES (?, ?, ?, ?)",
+                          (timestamp_str, station, info.get('min', 0), info.get('raw', '')))
+        
         conn.commit()
         conn.close()
     except Exception as e:
