@@ -30,23 +30,18 @@ for i, (name, d) in enumerate(data.items()):
 # --- 2. TREND CHART ---
 st.subheader("📈 24h Trend")
 with sqlite3.connect(DB_NAME) as conn:
-    # WICHTIG: Wir laden alle Daten für das Dataframe (für das Debug-Tab), 
-    # filtern aber hier gezielt für das Diagramm.
-    
     # 1. Zeitstempel für "vor 24 Stunden" berechnen
     cutoff_24h = (datetime.now(CH_TZ) - pd.Timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S')
     
-    # 2. Nur die Daten der letzten 24h für den Chart abfragen
-    query_chart = f"SELECT * FROM stats WHERE timestamp >= '{cutoff_24h}' ORDER BY timestamp ASC"
-    df_chart = pd.read_sql_query(query_chart, conn)
+    # 2. Nur Daten der letzten 24h für das Diagramm laden
+    df_chart = pd.read_sql_query(f"SELECT * FROM stats WHERE timestamp >= '{cutoff_24h}' ORDER BY timestamp ASC", conn)
     
-    # 3. Optional: Alle Daten für das Debug-Tab laden (letzte 2 Wochen)
+    # 3. Alle Daten (für die Historie) laden
     df_history = pd.read_sql_query("SELECT * FROM stats ORDER BY timestamp DESC", conn)
 
 if not df_chart.empty:
     df_chart['timestamp'] = pd.to_datetime(df_chart['timestamp'])
     
-    # Chart Definition
     chart = alt.Chart(df_chart).mark_line(interpolate='monotone', size=3).encode(
         x=alt.X('timestamp:T', 
                 axis=alt.Axis(
@@ -64,19 +59,19 @@ if not df_chart.empty:
 else:
     st.info("Sammle Daten für das 24h-Diagramm...")
 
-# Im Debug-Bereich unten kannst du dann df_history statt df_chart anzeigen:
-with st.expander("🛠️ Debug Informationen"):
-    # ... (Tabs Code) ...
-    with tab2:
-        st.dataframe(df_history, use_container_width=True)
-
-# --- 3. DEBUG BEREICH ---
+# --- 3. DEBUG BEREICH (Hier lag der Fehler) ---
 st.markdown("---")
 with st.expander("🛠️ Debug Informationen"):
-    tab1, tab2 = st.tabs(["Aktuelle Raw Data", "Datenbank Historie"])
+    # Hier definieren wir tab1 und tab2 korrekt
+    tab1, tab2 = st.tabs(["Aktuelle Daten (JSON)", "Datenbank Historie (komplett)"])
+    
     with tab1:
         st.json(data)
+        
     with tab2:
-        st.dataframe(df.sort_values("timestamp", ascending=False), use_container_width=True)
+        # Hier zeigen wir df_history an, das alle Daten enthält
+        st.dataframe(df_history, use_container_width=True)
+        
+
 
 st.caption(f"Letztes Update: {datetime.now(CH_TZ).strftime('%H:%M:%S')} | Raster: 5 Min")
