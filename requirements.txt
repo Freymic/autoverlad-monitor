@@ -7,3 +7,4 @@ altair
 lxml
 selenium
 webdriver-manager
+pytz
