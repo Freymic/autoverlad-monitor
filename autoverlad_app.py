@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup
 
 # --- 1. CONFIG & REFRESH ---
 st.set_page_config(page_title="Alpen-Verlad Monitor DEV", layout="wide")
+# Globaler Refresh alle 5 Minuten
 st_autorefresh(interval=5 * 60 * 1000, key="global_refresh")
 
 DB_NAME = 'autoverlad_v6.db'
@@ -27,7 +28,7 @@ def init_db():
 def save_stats(data_dict):
     conn = sqlite3.connect(DB_NAME)
     now = datetime.now()
-    # Letzten Zeitstempel prüfen, um 5-Min-Takt zu erzwingen
+    # Prüfen, ob der letzte Eintrag mindestens 4.5 Minuten her ist (Vermeidung von Duplikaten)
     last_entry = pd.read_sql_query("SELECT timestamp FROM stats ORDER BY timestamp DESC LIMIT 1", conn)
     if not last_entry.empty:
         last_time = pd.to_datetime(last_entry['timestamp'].iloc[0])
@@ -39,11 +40,13 @@ def save_stats(data_dict):
         conn.execute("INSERT INTO stats VALUES (?, ?, ?, ?)", 
                      (now, station, info['min'], info['raw']))
     
+    # 14 Tage Speicherzeitraum einhalten
     conn.execute("DELETE FROM stats WHERE timestamp < ?", (now - timedelta(days=14),))
     conn.commit()
     conn.close()
 
 def get_trend(station, current_val):
+    """Vergleicht aktuellen Wert mit dem Wert von vor ca. 2 Stunden."""
     conn = sqlite3.connect(DB_NAME)
     two_hours_ago = datetime.now() - timedelta(hours=2)
     query = "SELECT minuten FROM stats WHERE station = ? AND timestamp <= ? ORDER BY timestamp DESC LIMIT 1"
@@ -59,19 +62,20 @@ def get_trend(station, current_val):
 # --- 3. DATEN-ABRUF ---
 def fetch_all_data():
     results = {
-        "Oberwald": {"min": 0, "raw": ""},
-        "Realp": {"min": 0, "raw": ""},
-        "Kandersteg": {"min": 0, "raw": ""},
-        "Goppenstein": {"min": 0, "raw": ""}
+        "Oberwald": {"min": 0, "raw": "Keine Daten"},
+        "Realp": {"min": 0, "raw": "Keine Daten"},
+        "Kandersteg": {"min": 0, "raw": "Keine Daten"},
+        "Goppenstein": {"min": 0, "raw": "Keine Daten"}
     }
     
     # --- FURKA (RSS) ---
     try:
         f_resp = requests.get("https://mgb-prod.oevfahrplan.ch/incident-manager-api/incidentmanager/rss?publicId=av_furka&lang=de", timeout=10)
+        f_resp.encoding = 'utf-8'
         root = ET.fromstring(f_resp.content)
         for item in root.findall('.//item'):
-            title = item.find('title').text
-            desc = item.find('description').text
+            title = item.find('title').text or ""
+            desc = item.find('description').text or ""
             full = f"{title} {desc}"
             raw_xml = ET.tostring(item, encoding='unicode')
             
@@ -83,18 +87,30 @@ def fetch_all_data():
             if "Realp" in full: results["Realp"] = {"min": val, "raw": raw_xml}
     except Exception as e: st.warning(f"Furka RSS Fehler: {e}")
 
-    # --- LÖTSCHBERG (Web) ---
+    # --- LÖTSCHBERG (Web Scraping) ---
     try:
         l_resp = requests.get("https://www.bls.ch/de/fahren/autoverlad/betriebslage", timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        l_resp.encoding = 'utf-8'
         soup = BeautifulSoup(l_resp.text, 'html.parser')
-        # Wir speichern einen Teil des HTMLs für das Debugging
-        main_content = str(soup.find('main'))[:1000] 
+        full_text = soup.get_text()
         
         for st_name in ["Kandersteg", "Goppenstein"]:
-            # Suche nach Wartezeit im Text
-            match = re.search(rf"{st_name}.*?(\d+)\s*Minute", soup.get_text(), re.IGNORECASE)
-            val = int(match.group(1)) if match else 0
-            results[st_name] = {"min": val, "raw": f"Gefundenes Pattern für {st_name}: {val} Min. | HTML Snippet: {main_content}"}
+            # Suche nach Stunden und Minuten in der Nähe des Stationsnamens
+            # Regex sucht im Umkreis von 100 Zeichen nach dem Stationsnamen
+            pattern = rf"{st_name}.{{0,100}}?(\d+)\s*(Stunde|Minute)"
+            matches = re.finditer(pattern, full_text, re.IGNORECASE | re.DOTALL)
+            
+            val = 0
+            found_raw = f"Suche für {st_name}..."
+            for m in matches:
+                num = int(m.group(1))
+                unit = m.group(2).lower()
+                if "stunde" in unit: val = num * 60
+                else: val = num
+                found_raw = f"Match: {m.group(0)}"
+                break # Ersten Treffer nehmen
+                
+            results[st_name] = {"min": val, "raw": found_raw}
     except Exception as e: st.warning(f"Lötschberg Fehler: {e}")
     
     return results
@@ -106,29 +122,41 @@ save_stats(all_data)
 
 st.title("🏔️ Alpen-Autoverlad Live-Monitor")
 
-# Darstellung Metriken
+# Darstellung Metriken (4 Spalten)
 cols = st.columns(4)
 for i, (name, d) in enumerate(all_data.items()):
     diff, arrow = get_trend(name, d['min'])
-    delta_str = f"{diff} min (2h)" if diff is not None else "Initialisierung..."
+    delta_str = f"{diff:+} min (2h)" if diff is not None else "Initialisierung..."
     with cols[i]:
         st.metric(label=f"{arrow} {name}", value=f"{d['min']} Min", delta=delta_str, delta_color="inverse")
 
-# --- 5. TREND DIAGRAMM ---
-st.subheader("📈 24h Trend (Alle Stationen)")
+# --- 5. 24h TREND DIAGRAMM (FIXED X-AXIS) ---
+st.subheader("📈 24h Trend (Stündliche Übersicht)")
 conn = sqlite3.connect(DB_NAME)
 df_24h = pd.read_sql_query("SELECT * FROM stats WHERE timestamp > ?", conn, params=(datetime.now() - timedelta(hours=24),))
 conn.close()
 
 if not df_24h.empty:
     df_24h['timestamp'] = pd.to_datetime(df_24h['timestamp'])
+    
+    # Altair Chart mit erzwungener stündlicher Beschriftung
     chart = alt.Chart(df_24h).mark_line(interpolate='monotone').encode(
-        x=alt.X('timestamp:T', axis=alt.Axis(format='%H:00', title='Uhrzeit', tickCount=12)),
-        y=alt.Y('minuten:Q', title='Minuten'),
-        color=alt.Color('station:N', title='Station'),
+        x=alt.X('timestamp:T', 
+                title='Uhrzeit',
+                axis=alt.Axis(
+                    format='%H:00', 
+                    tickCount=24,        # Versucht 24 Ticks (einen pro Stunde) zu setzen
+                    labelAngle=-45,
+                    grid=True
+                )),
+        y=alt.Y('minuten:Q', title='Wartezeit (Minuten)', scale=alt.Scale(domainMin=0)),
+        color=alt.Color('station:N', title='Station', scale=alt.Scale(scheme='tableau10')),
         tooltip=['timestamp:T', 'station:N', 'minuten:Q']
-    ).properties(height=400).interactive()
+    ).properties(height=450).interactive()
+    
     st.altair_chart(chart, use_container_width=True)
+else:
+    st.info("Sammle Daten für den 24h Trend...")
 
 # --- 6. DEBUG ACCORDION ---
 with st.expander("🛠️ Debug Informationen (Raw Data & DB History)"):
@@ -137,19 +165,19 @@ with st.expander("🛠️ Debug Informationen (Raw Data & DB History)"):
     with tab1:
         c1, c2 = st.columns(2)
         with c1:
-            st.write("**Oberwald Raw:**")
+            st.write("**Furka - Oberwald (RSS Item):**")
             st.code(all_data["Oberwald"]["raw"], language="xml")
-            st.write("**Kandersteg Raw:**")
-            st.code(all_data["Kandersteg"]["raw"], language="html")
+            st.write("**BLS - Kandersteg (Regex Match):**")
+            st.code(all_data["Kandersteg"]["raw"])
         with c2:
-            st.write("**Realp Raw:**")
+            st.write("**Furka - Realp (RSS Item):**")
             st.code(all_data["Realp"]["raw"], language="xml")
-            st.write("**Goppenstein Raw:**")
-            st.code(all_data["Goppenstein"]["raw"], language="html")
+            st.write("**BLS - Goppenstein (Regex Match):**")
+            st.code(all_data["Goppenstein"]["raw"])
             
     with tab2:
-        st.write("**Letzte DB-Einträge (nach Zeit sortiert):**")
+        st.write("**Letzte DB-Einträge (24h):**")
         if not df_24h.empty:
             st.dataframe(df_24h.sort_values(by="timestamp", ascending=False), use_container_width=True)
 
-st.caption(f"Letztes Update: {datetime.now().strftime('%H:%M:%S')} | Trend-Basis: 2 Stunden")
+st.caption(f"Update: {datetime.now().strftime('%H:%M:%S')} | Trend-Basis: 2 Stunden | Speicher: 14 Tage")
