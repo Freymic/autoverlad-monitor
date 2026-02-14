@@ -33,9 +33,9 @@ def save_to_db(data):
     try:
         conn = sqlite3.connect(DB_NAME)
         c = conn.cursor()
+        # WICHTIG: ISO-Format für den Zeitstempel (YYYY-MM-DD HH:MM:SS)
         timestamp = datetime.now(CH_TZ).strftime('%Y-%m-%d %H:%M:%S')
         for station, info in data.items():
-            # Wir speichern den Wert explizit in 'wait_time'
             c.execute("INSERT INTO stats VALUES (?, ?, ?, ?)",
                       (timestamp, station, int(info.get('min', 0)), info.get('raw', '')))
         conn.commit()
