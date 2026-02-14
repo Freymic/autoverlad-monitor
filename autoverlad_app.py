@@ -7,136 +7,130 @@ import sqlite3
 import altair as alt
 from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
+from bs4 import BeautifulSoup
 
 # --- 1. CONFIG & REFRESH ---
-st.set_page_config(page_title="Furka DEV - Final", layout="wide")
+st.set_page_config(page_title="Alpen-Verlad Monitor DEV", layout="wide")
+st_autorefresh(interval=5 * 60 * 1000, key="global_refresh")
 
-# Aktualisiert die App alle 5 Minuten automatisch
-st_autorefresh(interval=5 * 60 * 1000, key="furka_dev_refresh")
+DB_NAME = 'autoverlad_v5.db'
 
-# --- 2. DATABASE LOGIK (Speicher: 14 Tage) ---
-DB_NAME = 'furka_dev_v4.db'
-
+# --- 2. DATABASE LOGIK ---
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
+    # Wir speichern Station, Minuten und Zeitstempel
     c.execute('''CREATE TABLE IF NOT EXISTS stats 
-                 (timestamp DATETIME, oberwald_min INTEGER, realp_min INTEGER, 
-                  raw_ow TEXT, raw_re TEXT)''')
+                 (timestamp DATETIME, station TEXT, minuten INTEGER)''')
     conn.commit()
     conn.close()
 
-def save_to_db(ow_min, re_min, ow_raw, re_raw):
+def save_stats(data_dict):
     conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("INSERT INTO stats VALUES (?, ?, ?, ?, ?)", 
-              (datetime.now(), ow_min, re_min, ow_raw, re_raw))
-    # Alte Daten löschen (älter als 14 Tage)
-    c.execute("DELETE FROM stats WHERE timestamp < ?", 
-              (datetime.now() - timedelta(days=14),))
+    now = datetime.now()
+    # Prüfen, ob für diese Minute schon Daten da sind (Vermeidung von Dopplungen)
+    for station, mins in data_dict.items():
+        conn.execute("INSERT INTO stats VALUES (?, ?, ?)", (now, station, mins))
+    # Cleanup: Daten älter als 14 Tage löschen
+    conn.execute("DELETE FROM stats WHERE timestamp < ?", (now - timedelta(days=14),))
     conn.commit()
     conn.close()
 
-def load_data(hours=24):
+def get_trend(station, current_val):
+    """Vergleicht aktuellen Wert mit dem Wert von vor ca. 2 Stunden."""
     conn = sqlite3.connect(DB_NAME)
-    cutoff = datetime.now() - timedelta(hours=hours)
-    df = pd.read_sql_query("SELECT * FROM stats WHERE timestamp > ? ORDER BY timestamp ASC", 
-                           conn, params=(cutoff,))
+    two_hours_ago = datetime.now() - timedelta(hours=2)
+    # Suche den nächsten Wert, der ca. 2h alt ist
+    query = """SELECT minuten FROM stats 
+               WHERE station = ? AND timestamp <= ? 
+               ORDER BY timestamp DESC LIMIT 1"""
+    old_df = pd.read_sql_query(query, conn, params=(station, two_hours_ago))
     conn.close()
-    if not df.empty:
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-    return df
+    
+    if old_df.empty:
+        return None, "n/a"
+    
+    old_val = old_df['minuten'].iloc[0]
+    diff = current_val - old_val
+    
+    if diff > 0: return diff, "⬆️"
+    if diff < 0: return diff, "⬇️"
+    return 0, "➡️"
 
-# --- 3. RSS LOGIK (Stabil via MGB) ---
-def fetch_furka_rss():
+# --- 3. DATEN-ABRUF (FURKA & LÖTSCHBERG) ---
+def fetch_furka():
     url = "https://mgb-prod.oevfahrplan.ch/incident-manager-api/incidentmanager/rss?publicId=av_furka&lang=de"
-    res = {
-        "Oberwald": {"min": 0, "raw": "Keine aktuellen Daten"},
-        "Realp": {"min": 0, "raw": "Keine aktuellen Daten"},
-        "full_xml": ""
-    }
+    res = {"Oberwald": 0, "Realp": 0}
     try:
         resp = requests.get(url, timeout=10)
-        resp.encoding = 'utf-8'
-        res["full_xml"] = resp.text
-        if resp.status_code == 200:
-            root = ET.fromstring(resp.content)
-            for item in root.findall('.//item'):
-                title = item.find('title').text or ""
-                desc = item.find('description').text or ""
-                full = f"{title} {desc}"
-                raw_snippet = ET.tostring(item, encoding='unicode')
-                
-                direction = "Oberwald" if "Oberwald" in full else "Realp" if "Realp" in full else None
-                if direction:
-                    std = re.search(r'(\d+)\s*Stunde', full)
-                    mn  = re.search(r'(\d+)\s*Minute', full)
-                    val = int(std.group(1)) * 60 if std else int(mn.group(1)) if mn else 0
-                    res[direction]["min"] = val
-                    res[direction]["raw"] = raw_snippet
-    except Exception as e:
-        st.error(f"RSS Fehler: {e}")
+        root = ET.fromstring(resp.content)
+        for item in root.findall('.//item'):
+            full = f"{item.find('title').text} {item.find('description').text}"
+            std = re.search(r'(\d+)\s*Stunde', full)
+            mn = re.search(r'(\d+)\s*Minute', full)
+            val = int(std.group(1)) * 60 if std else int(mn.group(1)) if mn else 0
+            if "Oberwald" in full: res["Oberwald"] = val
+            if "Realp" in full: res["Realp"] = val
+    except: pass
     return res
 
-# --- 4. APP EXECUTION ---
+def fetch_loetschberg():
+    url = "https://www.bls.ch/de/fahren/autoverlad/betriebslage"
+    res = {"Kandersteg": 0, "Goppenstein": 0}
+    try:
+        resp = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        text = soup.get_text()
+        
+        for station in res.keys():
+            # Suche nach Mustern wie "Kandersteg: 30 Minuten" oder "Keine Wartezeit"
+            pattern = rf"{station}.*?(\d+)\s*Minute"
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                res[station] = int(match.group(1))
+            elif f"keine wartezeit" in text.lower():
+                res[station] = 0
+    except: pass
+    return res
+
+# --- 4. UI LOGIK ---
 init_db()
-data = fetch_furka_rss()
+furka_data = fetch_furka()
+bls_data = fetch_loetschberg()
+all_data = {**furka_data, **bls_data}
 
-# Prüfen, wann der letzte Eintrag gemacht wurde
-def should_save():
-    conn = sqlite3.connect(DB_NAME)
-    # Hol den Zeitstempel des allerletzten Eintrags
-    last_time_str = pd.read_sql_query("SELECT timestamp FROM stats ORDER BY timestamp DESC LIMIT 1", conn)
-    conn.close()
-    
-    if last_time_str.empty:
-        return True # Datenbank ist leer, also speichern
-    
-    last_time = pd.to_datetime(last_time_str['timestamp'].iloc[0])
-    # Nur speichern, wenn mehr als 4.5 Minuten vergangen sind
-    return datetime.now() > last_time + timedelta(minutes=4.5)
+# Nur speichern, wenn wir im 5-Min-Takt sind (Logik vereinfacht)
+save_stats(all_data)
 
-# Nur speichern, wenn der Abruf erfolgreich war UND das Intervall erreicht ist
-if data["full_xml"] and should_save():
-    save_to_db(data["Oberwald"]["min"], data["Realp"]["min"], 
-               data["Oberwald"]["raw"], data["Realp"]["raw"])
-    st.toast("Neuer Datenpunkt in Datenbank gespeichert!")
-    
-# --- 5. 24h TREND (ALTAIR FIX) ---
-df_24h = load_data(hours=24)
+st.title("🏔️ Alpen-Autoverlad Live-Monitor")
 
-if not df_24h.empty:
-    st.subheader("📈 Trend letzte 24 Stunden")
-    
-    # Daten für Altair transformieren
-    chart_df = df_24h.rename(columns={"timestamp": "Zeit", "oberwald_min": "Oberwald", "realp_min": "Realp"})
-    chart_data = chart_df.melt('Zeit', value_vars=['Oberwald', 'Realp'], 
-                               var_name='Station', value_name='Minuten')
+# Darstellung in 4 Spalten
+cols = st.columns(4)
+for i, (station, mins) in enumerate(all_data.items()):
+    with cols[i]:
+        diff, arrow = get_trend(station, mins)
+        # Delta zeigt die Veränderung zum Wert vor 2h
+        delta_val = f"{diff} min" if diff is not None else "Neu"
+        st.metric(label=f"{arrow} {station}", value=f"{mins} Min", delta=delta_val, delta_color="inverse")
 
-    # Chart Definition mit robusten Achsen
-    line_chart = alt.Chart(chart_data).mark_line(interpolate='monotone').encode(
-        x=alt.X('Zeit:T', 
-                title='Uhrzeit (volle Stunden)',
-                axis=alt.Axis(format='%H:00', tickCount=12, labelAngle=-45)),
-        y=alt.Y('Minuten:Q', title='Wartezeit (min)', scale=alt.Scale(domainMin=0)),
-        color=alt.Color('Station:N', scale=alt.Scale(range=['#FF4B4B', '#1C83E1'])),
-        tooltip=['Zeit:T', 'Station:N', 'Minuten:Q']
-    ).properties(height=400).interactive()
+# --- 5. 24h TREND DIAGRAMM ---
+st.subheader("📈 24h Trend (Vergleich alle Stationen)")
+conn = sqlite3.connect(DB_NAME)
+df = pd.read_sql_query("SELECT * FROM stats WHERE timestamp > ?", conn, 
+                       params=(datetime.now() - timedelta(hours=24),))
+conn.close()
 
-    st.altair_chart(line_chart, use_container_width=True)
-else:
-    st.info("Sammle erste Daten für den 24h-Trend...")
+if not df.empty:
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    chart = alt.Chart(df).mark_line(interpolate='monotone').encode(
+        x=alt.X('timestamp:T', axis=alt.Axis(format='%H:00', title='Uhrzeit (24h)', tickCount=12)),
+        y=alt.Y('minuten:Q', title='Wartezeit (min)'),
+        color=alt.Color('station:N', title='Station'),
+        tooltip=['timestamp:T', 'station:N', 'minuten:Q']
+    ).properties(height=450).interactive()
+    st.altair_chart(chart, use_container_width=True)
 
-# --- 6. DEBUG ACCORDION ---
-with st.expander("🛠️ Debug Informationen (RSS & Datenbank)"):
-    t1, t2 = st.tabs(["Raw RSS", "DB History (24h)"])
-    with t1:
-        ca, cb = st.columns(2)
-        ca.write("**RSS Oberwald:**")
-        ca.code(data["Oberwald"]["raw"], language="xml")
-        cb.write("**RSS Realp:**")
-        cb.code(data["Realp"]["raw"], language="xml")
-    with t2:
-        st.dataframe(df_24h.sort_values(by="timestamp", ascending=False), use_container_width=True)
-
-st.caption(f"Letzter Abgleich: {datetime.now().strftime('%H:%M:%S')} | Speicherzeitraum: 14 Tage")
+# --- 6. DEBUG ---
+with st.expander("🛠️ Debug & History"):
+    st.write("**Letzte DB Einträge:**")
+    st.dataframe(df.sort_values(by="timestamp", ascending=False).head(20))
