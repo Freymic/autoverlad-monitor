@@ -1,5 +1,4 @@
 import requests
-from bs4 import BeautifulSoup
 import xml.etree.ElementTree as ET
 import re
 import sqlite3
@@ -11,6 +10,7 @@ DB_NAME = 'autoverlad.db'
 CH_TZ = pytz.timezone('Europe/Zurich')
 
 def init_db():
+    """Erstellt die Tabelle 'stats', die pandas sucht (image_8d6600.jpg)."""
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS stats
@@ -19,6 +19,7 @@ def init_db():
     conn.close()
 
 def parse_time_to_minutes(time_str):
+    """Extrahiert Zahlen aus Texten wie '30 Min' oder 'Keine Wartezeit'."""
     if not time_str or "Keine" in time_str:
         return 0
     digits = ''.join(filter(str.isdigit, time_str))
@@ -28,6 +29,7 @@ def parse_time_to_minutes(time_str):
         return 0
 
 def save_to_db(data):
+    """Speichert die Ergebnisse in der Tabelle 'stats'."""
     try:
         conn = sqlite3.connect(DB_NAME)
         c = conn.cursor()
@@ -43,13 +45,14 @@ def save_to_db(data):
 def fetch_all_data():
     results = {}
     
-    # --- 1. FURKA LOGIK (Deine RSS-Version) ---
+    # --- 1. FURKA LOGIK (Bewährte RSS-Version) ---
     try:
-        f_resp = requests.get("https://mgb-prod.oevfahrplan.ch/incident-manager-api/incidentmanager/rss?publicId=av_furka&lang=de", timeout=10)
+        f_url = "https://mgb-prod.oevfahrplan.ch/incident-manager-api/incidentmanager/rss?publicId=av_furka&lang=de"
+        f_resp = requests.get(f_url, timeout=10)
         f_resp.encoding = 'utf-8'
         root = ET.fromstring(f_resp.content)
         
-        # Standardwerte, falls nichts im Feed steht
+        # Standardwerte setzen
         results["Oberwald"] = {"min": 0, "raw": "Keine Wartezeit Oberwald."}
         results["Realp"] = {"min": 0, "raw": "Keine Wartezeit Realp."}
         
@@ -58,46 +61,40 @@ def fetch_all_data():
             desc = item.find('description').text if item.find('description') is not None else ""
             full = f"{title} {desc}"
             
-            # Zeit-Extraktion aus deinem Code
             m = re.search(r'(\d+)\s*Minute', full)
             h = re.search(r'(\d+)\s*Stunde', full)
             val = (int(h.group(1))*60 if h else int(m.group(1)) if m else 0)
             
-            raw_text = desc if desc else "Keine Wartezeit."
-            
             if "Oberwald" in full:
-                results["Oberwald"] = {"min": val, "raw": raw_text}
+                results["Oberwald"] = {"min": val, "raw": desc if desc else "Wartezeit Oberwald"}
             if "Realp" in full:
-                results["Realp"] = {"min": val, "raw": raw_text}
-    except Exception as e:
-        print(f"Furka RSS Fehler: {e}")
-
-    # --- 2. LÖTSCHBERG LOGIK (Web Scraping) ---
-    try:
-        l_url = "https://www.bls.ch/de/fahren/autoverlad/loetschberg/betriebslage"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0"}
-        l_res = requests.get(l_url, headers=headers, timeout=15)
-        soup = BeautifulSoup(l_res.text, 'html.parser')
-        
-        # Suche nach stName und stInfo (siehe image_8ceafc.png)
-        lines = soup.find_all('div', class_='stLine')
-        for line in lines:
-            n_div = line.find('div', class_='stName')
-            i_div = line.find('div', class_='stInfo')
-            if n_div and i_div:
-                name = n_div.get_text(strip=True)
-                info = i_div.get_text(strip=True)
-                results[name] = {"min": parse_time_to_minutes(info), "raw": info}
+                results["Realp"] = {"min": val, "raw": desc if desc else "Wartezeit Realp"}
     except:
         pass
 
-    # Sicherstellen, dass die Keys für die App existieren
-    for s in ["Kandersteg", "Goppenstein"]:
-        if s not in results:
-            results[s] = {"min": 0, "raw": "Keine Info"}
+    # --- 2. LÖTSCHBERG LOGIK (Deine neue API-Quelle) ---
+    try:
+        # Die korrigierte URL mit avwV2
+        l_url = "https://www.bls.ch/api/avwV2/delays?dataSourceId={808904A8-0874-44AC-8DE3-4A5FC33D8CF1}"
+        l_res = requests.get(l_url, timeout=10).json()
+        
+        for item in l_res:
+            name = item.get('stName') # z.B. "Kandersteg"
+            info = item.get('stInfo') # z.B. "Keine Wartezeiten"
+            
+            if name and info:
+                results[name] = {
+                    "min": parse_time_to_minutes(info),
+                    "raw": info
+                }
+    except:
+        # Fallback falls die API doch mal klemmt
+        if "Kandersteg" not in results:
+            results["Kandersteg"] = {"min": 0, "raw": "Keine Info"}
+            results["Goppenstein"] = {"min": 0, "raw": "Keine Info"}
 
     save_to_db(results)
     return results
 
-# Alias für die App
+# Alias für die App-Importe (image_8d7123.png)
 get_quantized_data = fetch_all_data
