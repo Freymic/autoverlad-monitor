@@ -6,6 +6,7 @@ import pandas as pd
 import sqlite3
 from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
+import altair as alt
 
 # --- 1. CONFIG & REFRESH ---
 st.set_page_config(page_title="Furka DEV - 24h Trend", layout="wide")
