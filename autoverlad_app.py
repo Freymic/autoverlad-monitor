@@ -40,31 +40,46 @@ with sqlite3.connect(DB_NAME) as conn:
 
 # --- 3. TREND CHART ---
 st.subheader("📈 24h Trend")
+
 if not df_chart.empty:
-    # Datentypen für Altair fixen
-    df_chart['timestamp'] = pd.to_datetime(df_chart['timestamp'])
-    df_chart['minutes'] = pd.to_numeric(df_chart['minutes'])
+    # 1. DATEN-REINIGUNG (Das "Sicherheitsnetz")
+    df_plot = df_chart.copy()
     
-    chart = alt.Chart(df_chart).mark_line(interpolate='monotone', size=3, point=True).encode(
+    # Sicherstellen, dass timestamp ein echtes Datum ohne Zeitzonen-Konflikt ist
+    df_plot['timestamp'] = pd.to_datetime(df_plot['timestamp']).dt.tz_localize(None)
+    
+    # Sicherstellen, dass minutes eine echte Zahl ist
+    df_plot['minutes'] = pd.to_numeric(df_plot['minutes'], errors='coerce').fillna(0).astype(int)
+    
+    # 2. CHART DEFINITION
+    chart = alt.Chart(df_plot).mark_line(
+        interpolate='monotone', 
+        size=3, 
+        point=True  # Zeigt Punkte, falls noch keine Linie möglich ist
+    ).encode(
         x=alt.X('timestamp:T', 
+                title="Uhrzeit (CET)",
                 axis=alt.Axis(
                     format='%H:%M', 
-                    title="Uhrzeit (CET)",
-                    tickCount={'interval': 'hour', 'step': 1},
+                    tickCount='hour', 
                     labelAngle=-45
                 )),
-        y=alt.Y('minutes:Q', title="Wartezeit (Min)"),
-        color=alt.Color('station:N', title="Station"),
+        y=alt.Y('minutes:Q', 
+                title="Wartezeit (Minuten)",
+                scale=alt.Scale(domainMin=0, nice=True)), # Startet immer bei 0
+        color=alt.Color('station:N', title="Station", scale=alt.Scale(scheme='category10')),
         tooltip=[
             alt.Tooltip('timestamp:T', format='%H:%M', title='Zeit'),
             alt.Tooltip('station:N', title='Station'),
-            alt.Tooltip('minutes:Q', title='Minuten')
+            alt.Tooltip('minutes:Q', title='Wartezeit (Min)')
         ]
-    ).properties(height=400).interactive()
+    ).properties(
+        height=400
+    ).interactive()
     
     st.altair_chart(chart, use_container_width=True)
 else:
-    st.info("Sammle Daten für das 24h-Diagramm... (Punkte erscheinen alle 5 Minuten)")
+    st.info("Noch keine Daten für die letzten 2
 
 # --- 4. DEBUG BEREICH (NameError Fix) ---
 st.markdown("---")
