@@ -28,21 +28,25 @@ def init_db():
 def save_stats(data_dict):
     conn = sqlite3.connect(DB_NAME)
     now = datetime.now()
-    # Prüfen, ob der letzte Eintrag mindestens 4.5 Minuten her ist (Vermeidung von Duplikaten)
-    last_entry = pd.read_sql_query("SELECT timestamp FROM stats ORDER BY timestamp DESC LIMIT 1", conn)
-    if not last_entry.empty:
-        last_time = pd.to_datetime(last_entry['timestamp'].iloc[0])
-        if now < last_time + timedelta(minutes=4.5):
-            conn.close()
-            return
-
-    for station, info in data_dict.items():
-        conn.execute("INSERT INTO stats VALUES (?, ?, ?, ?)", 
-                     (now, station, info['min'], info['raw']))
     
-    # 14 Tage Speicherzeitraum einhalten
-    conn.execute("DELETE FROM stats WHERE timestamp < ?", (now - timedelta(days=14),))
-    conn.commit()
+    # Zeit auf das letzte 5-Minuten-Intervall abrunden (z.B. 14:07 -> 14:05)
+    rounded_minute = (now.minute // 5) * 5
+    timestamp_rounded = now.replace(minute=rounded_minute, second=0, microsecond=0)
+    
+    # Prüfen, ob für diesen exakten 5-Min-Slot bereits Daten vorhanden sind
+    query = "SELECT 1 FROM stats WHERE timestamp = ? LIMIT 1"
+    exists = pd.read_sql_query(query, conn, params=(timestamp_rounded,))
+    
+    if exists.empty:
+        for station, info in data_dict.items():
+            conn.execute("INSERT INTO stats VALUES (?, ?, ?, ?)", 
+                         (timestamp_rounded, station, info['min'], info['raw']))
+        
+        # Cleanup: Alles älter als 14 Tage löschen
+        conn.execute("DELETE FROM stats WHERE timestamp < ?", (now - timedelta(days=14),))
+        conn.commit()
+        st.toast(f"Datenpunkt für {timestamp_rounded.strftime('%H:%M')} gespeichert")
+    
     conn.close()
 
 def get_trend(station, current_val):
