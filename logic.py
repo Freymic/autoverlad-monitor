@@ -125,3 +125,41 @@ def fetch_all_data():
 
 # Wichtig für den Import in autoverlad_app.py
 get_quantized_data = fetch_all_data
+
+def fetch_timetable(station_id):
+    """Holt die nächsten 3 Abfahrten für eine gegebene Stations-ID."""
+    try:
+        # Limit 10, um genug Puffer für Filterung zu haben
+        url = f"https://transport.opendata.ch/v1/stationboard?id={station_id}&limit=10"
+        response = requests.get(url, timeout=5).json()
+        
+        departures = []
+        for journey in response.get('stationboard', []):
+            # Wir filtern nach 'AT' (Autozug) oder prüfen den Namen
+            # Bei Lötschberg/Furka sind es oft spezielle Pendelzüge
+            category = journey.get('category')
+            name = journey.get('name', '')
+            
+            # Filter: Wir nehmen Züge, die typisch für den Verlad sind
+            if category in ['AT', 'BAT', 'EXT'] or "Auto" in name or category == 'R':
+                time_str = journey.get('stop', {}).get('departure')
+                # Zeit hübsch formatieren (ISO -> HH:MM)
+                clean_time = datetime.fromisoformat(time_str.replace('Z', '+00:00')).strftime('%H:%M')
+                to = journey.get('to')
+                departures.append(f"{clean_time} -> {to}")
+            
+            if len(departures) >= 3: break # Nur die nächsten 3
+            
+        return departures
+    except Exception as e:
+        return [f"Fehler: {e}"]
+
+def get_all_timetables():
+    """Mapping der IDs auf unsere Stationen."""
+    stations = {
+        "Kandersteg": "8501140",
+        "Goppenstein": "8501142",
+        "Oberwald": "8505169",
+        "Realp": "8505165"
+    }
+    return {name: fetch_timetable(sid) for name, sid in stations.items()}
