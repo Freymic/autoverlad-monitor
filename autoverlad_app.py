@@ -82,20 +82,26 @@ def fetch_furka_rss():
 init_db()
 data = fetch_furka_rss()
 
-# Nur speichern, wenn der Abruf erfolgreich war (Status 200)
-if "full_xml" in data and data["full_xml"]:
+# Prüfen, wann der letzte Eintrag gemacht wurde
+def should_save():
+    conn = sqlite3.connect(DB_NAME)
+    # Hol den Zeitstempel des allerletzten Eintrags
+    last_time_str = pd.read_sql_query("SELECT timestamp FROM stats ORDER BY timestamp DESC LIMIT 1", conn)
+    conn.close()
+    
+    if last_time_str.empty:
+        return True # Datenbank ist leer, also speichern
+    
+    last_time = pd.to_datetime(last_time_str['timestamp'].iloc[0])
+    # Nur speichern, wenn mehr als 4.5 Minuten vergangen sind
+    return datetime.now() > last_time + timedelta(minutes=4.5)
+
+# Nur speichern, wenn der Abruf erfolgreich war UND das Intervall erreicht ist
+if data["full_xml"] and should_save():
     save_to_db(data["Oberwald"]["min"], data["Realp"]["min"], 
                data["Oberwald"]["raw"], data["Realp"]["raw"])
-
-st.title("🏔️ Furka Monitor (Development Branch)")
-
-# Metriken für die aktuelle Situation
-col1, col2 = st.columns(2)
-with col1:
-    st.metric("Oberwald (VS)", f"{data['Oberwald']['min']} Min")
-with col2:
-    st.metric("Realp (UR)", f"{data['Realp']['min']} Min")
-
+    st.toast("Neuer Datenpunkt in Datenbank gespeichert!")
+    
 # --- 5. 24h TREND (ALTAIR FIX) ---
 df_24h = load_data(hours=24)
 
