@@ -32,6 +32,7 @@ for i, (name, d) in enumerate(data.items()):
 # --- 2. TREND CHART ---
 st.subheader("📈 24h Trend")
 with sqlite3.connect(DB_NAME) as conn:
+    # Wir laden die Daten und stellen sicher, dass die Spalte 'minutes' vorhanden ist
     df = pd.read_sql_query("SELECT * FROM stats ORDER BY timestamp ASC", conn)
 
 if not df.empty:
@@ -39,18 +40,24 @@ if not df.empty:
     df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
     df = df.dropna(subset=['timestamp'])
     
+    # Chart-Definition mit Korrektur der Spalten und X-Achse
     chart = alt.Chart(df).mark_line(interpolate='monotone').encode(
         x=alt.X('timestamp:T', 
                 axis=alt.Axis(
                     format='%H:00', 
                     title="Uhrzeit (CET)",
-                    tickCount={'interval': 'hour', 'step': 1} # Erzwingt volle Stunden
+                    # Erzwingt die Anzeige jeder vollen Stunde
+                    tickCount={'interval': 'hour', 'step': 1}
                 )),
-        y=alt.Y('minutes:Q', title="Wartezeit (Min)"), # Korrigiert von 'minuten' auf 'minutes'
+        y=alt.Y('minutes:Q', title="Wartezeit (Min)"), # Spalte muss 'minutes' sein
         color='station:N',
         tooltip=['timestamp:T', 'station:N', 'minutes:Q']
     ).properties(height=400).interactive()
+    
     st.altair_chart(chart, use_container_width=True)
+else:
+    st.info("Noch keine Daten für das Diagramm verfügbar.")
+    
     
 
 # --- 3. DEBUG BEREICH (Wieder eingebaut) ---
