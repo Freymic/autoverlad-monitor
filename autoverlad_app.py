@@ -40,12 +40,18 @@ if not df.empty:
     df = df.dropna(subset=['timestamp'])
     
     chart = alt.Chart(df).mark_line(interpolate='monotone').encode(
-        x=alt.X('timestamp:T', axis=alt.Axis(format='%H:00', title="Uhrzeit (CET)")),
-        y=alt.Y('minuten:Q', title="Wartezeit (Min)"),
+        x=alt.X('timestamp:T', 
+                axis=alt.Axis(
+                    format='%H:00', 
+                    title="Uhrzeit (CET)",
+                    tickCount={'interval': 'hour', 'step': 1} # Erzwingt volle Stunden
+                )),
+        y=alt.Y('minutes:Q', title="Wartezeit (Min)"), # Korrigiert von 'minuten' auf 'minutes'
         color='station:N',
-        tooltip=['timestamp:T', 'station:N', 'minuten:Q']
+        tooltip=['timestamp:T', 'station:N', 'minutes:Q']
     ).properties(height=400).interactive()
     st.altair_chart(chart, use_container_width=True)
+    
 
 # --- 3. DEBUG BEREICH (Wieder eingebaut) ---
 st.markdown("---")
