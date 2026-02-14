@@ -3,7 +3,7 @@ import xml.etree.ElementTree as ET
 import re
 import sqlite3
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 
 # Konstanten
@@ -20,146 +20,96 @@ def init_db():
     conn.close()
 
 def parse_time_to_minutes(time_str):
-    if not time_str:
+    """Extrahiert Minuten aus den API-Texten."""
+    if not time_str or any(word in time_str.lower() for word in ["keine", "no", "none"]):
         return 0
-    # Erkennt "Keine", "No waiting", etc. als 0
-    if any(word in time_str.lower() for word in ["keine", "no", "none"]):
-        return 0
-    # Extrahiert alle Ziffern (z.B. "15 Min" -> 15)
+    # Sucht nach Zahlen im Text (z.B. '15' aus '15 Min')
     digits = ''.join(filter(str.isdigit, time_str))
     return int(digits) if digits else 0
 
 def save_to_db(data):
-    """Speichert Daten exakt im 5-Minuten-Takt (xx:00, xx:05, xx:10...)."""
+    """Speichert Daten im 5-Minuten-Raster und löscht alte Einträge."""
     try:
         conn = sqlite3.connect(DB_NAME)
         c = conn.cursor()
         
-        # Aktuelle Zeit in CH-Zeit holen
+        # Zeit auf 5 Minuten abrunden (xx:00, xx:05, xx:10...)
         now = datetime.now(CH_TZ)
-        
-        # --- QUANTISIERUNG ---
-        # Berechnet die abgerundete 5-Minuten-Marke
         minute_quantized = (now.minute // 5) * 5
-        # Ersetzt Minute durch quantisierten Wert und setzt Sekunden/Mikrosekunden auf 0
         quantized_now = now.replace(minute=minute_quantized, second=0, microsecond=0)
         timestamp_str = quantized_now.strftime('%Y-%m-%d %H:%M:%S')
         
         for station, info in data.items():
-            # Prüfen, ob für dieses 5-Minuten-Fenster und diese Station schon ein Wert existiert
+            # Dubletten-Check für dieses Zeitfenster
             c.execute("SELECT 1 FROM stats WHERE timestamp = ? AND station = ?", (timestamp_str, station))
             if not c.fetchone():
                 c.execute("INSERT INTO stats VALUES (?, ?, ?, ?)",
                           (timestamp_str, station, info.get('min', 0), info.get('raw', '')))
-                print(f"Gespeichert: {station} für {timestamp_str}") # Kontroll-Ausgabe
-            else:
-                # Falls schon ein Eintrag existiert (z.B. durch Refresh), wird nichts getan
-                pass
-                
+        
+        # Automatische Reinigung: Alles älter als 14 Tage löschen
+        cutoff = (now - timedelta(days=14)).strftime('%Y-%m-%d %H:%M:%S')
+        c.execute("DELETE FROM stats WHERE timestamp < ?", (cutoff,))
+        
         conn.commit()
         conn.close()
     except Exception as e:
         print(f"DB Error: {e}")
 
 def fetch_all_data():
-    """Holt Daten von Furka und Lötschberg mit Profi-Headern."""
+    """Holt Wartezeiten von Furka und Lötschberg."""
     results = {}
-    
-    # Die neuen Header, damit die BLS-API uns als Browser erkennt
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json'
     }
 
-    # --- 1. FURKA (RSS) ---
+    # --- FURKA (RSS) ---
     try:
         f_url = "https://mgb-prod.oevfahrplan.ch/incident-manager-api/incidentmanager/rss?publicId=av_furka&lang=de"
-        f_resp = requests.get(f_url, headers=headers, timeout=10)
-        f_resp.encoding = 'utf-8'
+        f_resp = requests.get(f_url, timeout=10)
         root = ET.fromstring(f_resp.content)
-        
         results["Oberwald"] = {"min": 0, "raw": "Keine Wartezeit."}
         results["Realp"] = {"min": 0, "raw": "Keine Wartezeit."}
-        
         for item in root.findall('.//item'):
-            title = item.find('title').text or ""
-            desc = item.find('description').text or ""
-            full = f"{title} {desc}"
+            full = f"{item.find('title').text} {item.find('description').text}"
             val = parse_time_to_minutes(full)
-            
-            if "Oberwald" in full: 
-                results["Oberwald"] = {"min": val, "raw": desc}
-            if "Realp" in full: 
-                results["Realp"] = {"min": val, "raw": desc}
-    except Exception as e:
-        print(f"Furka Fehler: {e}")
+            if "Oberwald" in full: results["Oberwald"] = {"min": val, "raw": full}
+            if "Realp" in full: results["Realp"] = {"min": val, "raw": full}
+    except: pass
 
-    # --- 2. LÖTSCHBERG (JSON API) ---
+    # --- LÖTSCHBERG (JSON) ---
     try:
         l_url = "https://www.bls.ch/api/avwV2/delays?dataSourceId={808904A8-0874-44AC-8DE3-4A5FC33D8CF1}"
-        response = requests.get(l_url, headers=headers, timeout=10)
-        
-        if response.status_code == 200:
-            l_data = response.json()
-            # Wir navigieren direkt in die "Stations" Liste deiner Beispiel-Antwort
-            for entry in l_data.get("Stations", []):
-                name = entry.get("Station")
+        l_res = requests.get(l_url, headers=headers, timeout=10).json()
+        for entry in l_res.get("Stations", []):
+            name = entry.get("Station")
+            if name in ["Kandersteg", "Goppenstein"]:
                 msg = entry.get("DelayMessage")
-                
-                if name in ["Kandersteg", "Goppenstein"]:
-                    results[name] = {
-                        "min": parse_time_to_minutes(msg),
-                        "raw": json.dumps(entry, ensure_ascii=False)
-                    }
-        else:
-            print(f"Lötschberg API Status Fehler: {response.status_code}")
-    except Exception as e:
-        print(f"Lötschberg API Verbindungsfehler: {e}")
-
-    # Sicherheitshalber Keys auffüllen
-    for s in ["Kandersteg", "Goppenstein", "Oberwald", "Realp"]:
-        if s not in results:
-            results[s] = {"min": 0, "raw": "Keine Daten verfügbar"}
+                results[name] = {"min": parse_time_to_minutes(msg), "raw": json.dumps(entry)}
+    except: pass
 
     return results
 
-# Wichtig für den Import in autoverlad_app.py
-get_quantized_data = fetch_all_data
-
 def fetch_timetable(station_id):
-    """Holt die nächsten 3 Abfahrten für eine gegebene Stations-ID."""
+    """Holt die nächsten 3 Abfahrten für Autozüge."""
     try:
-        # Limit 10, um genug Puffer für Filterung zu haben
-        url = f"https://transport.opendata.ch/v1/stationboard?id={station_id}&limit=10"
+        url = f"https://transport.opendata.ch/v1/stationboard?id={station_id}&limit=15"
         response = requests.get(url, timeout=5).json()
-        
         departures = []
         for journey in response.get('stationboard', []):
-            # Wir filtern nach 'AT' (Autozug) oder prüfen den Namen
-            # Bei Lötschberg/Furka sind es oft spezielle Pendelzüge
-            category = journey.get('category')
-            name = journey.get('name', '')
-            
-            # Filter: Wir nehmen Züge, die typisch für den Verlad sind
-            if category in ['AT', 'BAT', 'EXT'] or "Auto" in name or category == 'R':
-                time_str = journey.get('stop', {}).get('departure')
-                # Zeit hübsch formatieren (ISO -> HH:MM)
-                clean_time = datetime.fromisoformat(time_str.replace('Z', '+00:00')).strftime('%H:%M')
-                to = journey.get('to')
-                departures.append(f"{clean_time} -> {to}")
-            
-            if len(departures) >= 3: break # Nur die nächsten 3
-            
-        return departures
-    except Exception as e:
-        return [f"Fehler: {e}"]
+            cat = journey.get('category')
+            # Filter für Autozüge und Regionalzüge
+            if cat in ['AT', 'BAT', 'EXT', 'R']:
+                time_dt = datetime.fromisoformat(journey['stop']['departure'].replace('Z', '+00:00'))
+                time_str = time_dt.astimezone(CH_TZ).strftime('%H:%M')
+                dest = journey.get('to')
+                departures.append(f"{time_str} -> {dest}")
+            if len(departures) >= 3: break
+        return departures if departures else ["Keine Abfahrten"]
+    except:
+        return ["API Fehler"]
 
 def get_all_timetables():
-    """Mapping der IDs auf unsere Stationen."""
-    stations = {
-        "Kandersteg": "8501140",
-        "Goppenstein": "8501142",
-        "Oberwald": "8505169",
-        "Realp": "8505165"
-    }
-    return {name: fetch_timetable(sid) for name, sid in stations.items()}
+    """Mapping der Bahnhof-IDs."""
+    ids = {"Kandersteg": "8501140", "Goppenstein": "8501142", "Oberwald": "8505169", "Realp": "8505165"}
+    return {name: fetch_timetable(sid) for name, sid in ids.items()}
