@@ -17,25 +17,41 @@ def parse_time_to_minutes(text):
     return (int(std.group(1)) * 60 if std else 0) + (int(mn.group(1)) if mn else 0)
 
 def fetch_all_data():
-    res = {s: {"min": 0, "raw": "n/a"} for s in ["Oberwald", "Realp", "Kandersteg", "Goppenstein"]}
+    res = {s: {"min": 0, "raw": "Keine Info"} for s in ["Oberwald", "Realp", "Kandersteg", "Goppenstein"]}
     try:
-        # Furka
+        # --- FURKA (MGB) ---
         f_resp = requests.get("https://mgb-prod.oevfahrplan.ch/incident-manager-api/incidentmanager/rss?publicId=av_furka&lang=de", timeout=10)
         root = ET.fromstring(f_resp.content)
         for item in root.findall('.//item'):
             full = f"{item.find('title').text} {item.find('description').text}"
             val = parse_time_to_minutes(full)
-            if "Oberwald" in full: res["Oberwald"] = {"min": val, "raw": full}
-            if "Realp" in full: res["Realp"] = {"min": val, "raw": full}
-        # Lötschberg
+            if "Oberwald" in full: res["Oberwald"] = {"min": val, "raw": ET.tostring(item, encoding='unicode')}
+            if "Realp" in full: res["Realp"] = {"min": val, "raw": ET.tostring(item, encoding='unicode')}
+        
+        # --- LÖTSCHBERG (BLS) - GEZIELTE SUCHE ---
         l_resp = requests.get("https://www.bls.ch/de/fahren/autoverlad/betriebslage", timeout=10, headers={"User-Agent":"Mozilla/5.0"})
         soup = BeautifulSoup(l_resp.text, 'html.parser')
-        txt = soup.get_text()
-        for s in ["Kandersteg", "Goppenstein"]:
-            match = re.search(rf"{s}.{{0,100}}?(\d+)\s*(Minute|Stunde)", txt, re.I | re.S)
-            if match:
-                res[s] = {"min": parse_time_to_minutes(match.group(0)), "raw": match.group(0)}
-    except: pass
+        
+        # Wir suchen alle "stLine" Container aus deinem Screenshot
+        delay_elements = soup.find_all("div", class_="stLine")
+        
+        for element in delay_elements:
+            name_div = element.find("div", class_="stName")
+            info_div = element.find("div", class_="stInfo")
+            
+            if name_div and info_div:
+                st_name = name_div.get_text(strip=True)
+                st_info = info_div.get_text(strip=True)
+                
+                if st_name in ["Kandersteg", "Goppenstein"]:
+                    val = parse_time_to_minutes(st_info)
+                    # Wir speichern den exakten HTML-Teil als Raw-Info
+                    res[st_name] = {
+                        "min": val, 
+                        "raw": str(element) 
+                    }
+    except Exception as e:
+        print(f"Fetch Error: {e}")
     return res
 
 def init_db():
