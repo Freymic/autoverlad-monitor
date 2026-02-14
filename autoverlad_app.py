@@ -27,26 +27,30 @@ cols = st.columns(len(data))
 for i, (name, d) in enumerate(data.items()):
     cols[i].metric(label=name, value=f"{d['min']} Min")
 
-# --- 2. TREND CHART (Letzte 24h) ---
+# --- 2. TREND CHART ---
 st.subheader("📈 24h Trend")
 with sqlite3.connect(DB_NAME) as conn:
-    # Zeitfenster für den Chart berechnen
+    # Zeitstempel für vor 24h berechnen
     cutoff_24h = (datetime.now(CH_TZ) - pd.Timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S')
     
-    # Daten für Diagramm (24h) und Historie (alles) laden
+    # Daten laden
     df_chart = pd.read_sql_query(f"SELECT * FROM stats WHERE timestamp >= '{cutoff_24h}' ORDER BY timestamp ASC", conn)
-    df_history = pd.read_sql_query("SELECT * FROM stats ORDER BY timestamp DESC", conn)
 
 if not df_chart.empty:
-    df_chart['timestamp'] = pd.to_datetime(df_chart['timestamp'])
+    # FEHLERQUELLE NR. 1: Explizite Konvertierung mit Format-Angabe
+    df_chart['timestamp'] = pd.to_datetime(df_chart['timestamp'], format='%Y-%m-%d %H:%M:%S')
     
-    # Altair Chart mit dickerer Linie und sauberer X-Achse
+    # FEHLERQUELLE NR. 2: Sicherstellen, dass 'minutes' eine Zahl ist
+    df_chart['minutes'] = pd.to_numeric(df_chart['minutes'], errors='coerce').fillna(0)
+    
+    # Altair Chart Definition
     chart = alt.Chart(df_chart).mark_line(interpolate='monotone', size=3).encode(
         x=alt.X('timestamp:T', 
                 axis=alt.Axis(
-                    format='%H:00', 
+                    format='%H:%M', 
                     title="Uhrzeit (CET)",
-                    tickCount={'interval': 'hour', 'step': 1},
+                    # Wir lassen Altair die Ticks für den Moment selbst wählen, 
+                    # um sicherzugehen, dass etwas angezeigt wird
                     labelAngle=-45
                 )),
         y=alt.Y('minutes:Q', title="Wartezeit (Min)"),
@@ -60,7 +64,8 @@ if not df_chart.empty:
     
     st.altair_chart(chart, use_container_width=True)
 else:
-    st.info("Sammle Daten für das 24h-Diagramm... Schau in 5 Minuten wieder rein!")
+    # Das wird angezeigt, wenn df_chart wirklich leer ist
+    st.warning("Keine Daten in den letzten 24h gefunden. Prüfe die Datenbank-Historie im Debug-Bereich.")
 
 # --- 3. DEBUG BEREICH (Korrigiert) ---
 st.markdown("---")
