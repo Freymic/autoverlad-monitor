@@ -96,10 +96,37 @@ c2.metric("Realp", f"{data['Realp']['min']} Min")
 
 # --- 5. 24h TREND DIAGRAMM ---
 df_24h = load_data(hours=24)
+
 if not df_24h.empty:
     st.subheader("📈 Trend letzte 24 Stunden")
-    chart_df = df_24h.rename(columns={"timestamp": "Zeit", "oberwald_min": "Oberwald", "realp_min": "Realp"})
-    st.line_chart(chart_df.set_index("Zeit")[["Oberwald", "Realp"]])
+    
+    # Daten für Altair vorbereiten (von Breit- in Langformat umwandeln)
+    chart_df = df_24h.rename(columns={
+        "timestamp": "Zeit", 
+        "oberwald_min": "Oberwald", 
+        "realp_min": "Realp"
+    })
+    
+    # Umwandlung für Altair (Tidy Data)
+    chart_data = chart_df.melt('Zeit', value_vars=['Oberwald', 'Realp'], 
+                               var_name='Station', value_name='Wartezeit (min)')
+
+    # Erstellung des Altair Charts
+    chart = alt.Chart(chart_data).mark_line(interpolate='monotone').encode(
+        x=alt.X('Zeit:T', 
+                title='Uhrzeit',
+                axis=alt.Axis(
+                    format='%H:00',        # Zeigt nur Stunde:00
+                    tickCount='hour',      # Setzt Ticks auf jede Stunde
+                    labelOverlap='hide',   # Versteckt überlappende Labels
+                    grid=True
+                )),
+        y=alt.Y('Wartezeit (min):Q', title='Minuten'),
+        color=alt.Color('Station:N', scale=alt.Scale(range=['#FF4B4B', '#1C83E1'])), # Rot für OW, Blau für RE
+        tooltip=['Zeit:T', 'Station:N', 'Wartezeit (min):Q']
+    ).properties(height=400).interactive()
+
+    st.altair_chart(chart, use_container_width=True)
 
 # --- 6. DEBUG ACCORDION ---
 with st.expander("🛠️ Debug Informationen (RSS & Datenbank)"):
