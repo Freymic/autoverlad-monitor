@@ -12,7 +12,7 @@ sys.path.append(os.path.dirname(__file__))
 from logic import fetch_all_data, init_db, save_to_db, DB_NAME, CH_TZ
 
 # Konfiguration
-st.set_page_config(page_title="Alpen-Verlad PRO", layout="wide")
+st.set_page_config(page_title="Autoverlad Live-Monitor", layout="wide")
 st_autorefresh(interval=5 * 60 * 1000, key="global_refresh")
 
 # Daten-Initialisierung
@@ -20,7 +20,7 @@ init_db()
 data = fetch_all_data()
 save_to_db(data)
 
-st.title("🏔️ Alpen-Verlad Live-Monitor")
+st.title("🏔️ Autoverlad Live-Monitor")
 
 # --- 1. METRIKEN ---
 cols = st.columns(len(data))
