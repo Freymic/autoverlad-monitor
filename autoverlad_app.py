@@ -33,32 +33,33 @@ with sqlite3.connect(DB_NAME) as conn:
     df = pd.read_sql_query("SELECT * FROM stats ORDER BY timestamp ASC", conn)
 
 if not df.empty:
-    # Daten für Altair vorbereiten
-    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    # 1. Sicherstellen, dass das Datum absolut sauber erkannt wird
+    df['timestamp'] = pd.to_datetime(df['timestamp'], format='%Y-%m-%d %H:%M:%S')
     
-    # Chart Definition mit optimierter X-Achse
+    # 2. Den Chart mit einem festen Zeit-Raster bauen
     chart = alt.Chart(df).mark_line(interpolate='monotone').encode(
         x=alt.X('timestamp:T', 
                 axis=alt.Axis(
                     format='%H:00', 
                     title="Uhrzeit (CET)",
-                    # Erzwingt exakt jede volle Stunde als Beschriftung
-                    tickCount={'interval': 'hour', 'step': 1},
-                    labelAngle=-45,
-                    grid=True
+                    # Diese Kombination erzwingt die volle Stunde:
+                    tickCount='hour',
+                    values=pd.date_range(
+                        start=df['timestamp'].min().floor('H'), 
+                        end=df['timestamp'].max().ceil('H'), 
+                        freq='H'
+                    ).tolist(),
+                    labelAngle=-45
                 )),
         y=alt.Y('minutes:Q', title="Wartezeit (Min)"),
         color=alt.Color('station:N', title="Station"),
-        tooltip=[
-            alt.Tooltip('timestamp:T', format='%H:%M', title='Zeit'),
-            alt.Tooltip('station:N', title='Station'),
-            alt.Tooltip('minutes:Q', title='Wartezeit')
-        ]
+        tooltip=['timestamp:T', 'station:N', 'minutes:Q']
     ).properties(height=400).interactive()
     
     st.altair_chart(chart, use_container_width=True)
 else:
-    st.info("Sammle erste Datenpunkte für das Diagramm...")
+    st.info("Noch keine Daten vorhanden.")
+    
 
 # --- 3. DEBUG BEREICH ---
 st.markdown("---")
