@@ -52,20 +52,40 @@ def fetch_furka_data():
         return {"Realp": {"min": 0, "raw": "Keine Info"}, "Oberwald": {"min": 0, "raw": "Keine Info"}}
 
 def fetch_loetschberg_data():
-    """Scrapt Lötschberg-Daten (Kandersteg/Goppenstein)."""
+    """Scrapt Lötschberg-Daten und passt die Namen an die App an."""
     url = "https://www.bls.ch/de/fahren/autoverlad/loetschberg/betriebslage"
-    headers = {"User-Agent": "Mozilla/5.0"}
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    
     try:
         r = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(r.text, 'html.parser')
         results = {}
+        
+        # Wir suchen die stLine Container aus deinem Screenshot (image_8ceafc.png)
         for div in soup.find_all('div', class_='stLine'):
-            name = div.find('div', class_='stName').get_text(strip=True)
-            info = div.find('div', class_='stInfo').get_text(strip=True)
-            results[name] = {"min": parse_time_to_minutes(info), "raw": info}
+            name_div = div.find('div', class_='stName')
+            info_div = div.find('div', class_='stInfo')
+            
+            if name_div and info_div:
+                raw_name = name_div.get_text(strip=True)
+                info_text = info_div.get_text(strip=True)
+                
+                # WICHTIG: Mapping der Namen
+                # Falls deine App "Lötschberg Kandersteg" statt "Kandersteg" sucht:
+                display_name = raw_name
+                if "Kandersteg" in raw_name:
+                    display_name = "Kandersteg" # Oder "Lötschberg Kandersteg" - je nach App
+                elif "Goppenstein" in raw_name:
+                    display_name = "Goppenstein"
+                
+                results[display_name] = {
+                    "min": parse_time_to_minutes(info_text),
+                    "raw": info_text
+                }
         return results
-    except:
-        return {"Kandersteg": {"min": 0, "raw": "Keine Info"}, "Goppenstein": {"min": 0, "raw": "Keine Info"}}
+    except Exception as e:
+        print(f"Lötschberg Fehler: {e}")
+        return {}
 
 def fetch_all_data():
     """Kombiniert alles (für den Import in image_8d62e0.png)."""
