@@ -4,12 +4,12 @@ import sqlite3
 from datetime import datetime
 import pytz
 
-# Diese Konstanten werden von autoverlad_app.py erwartet (siehe image_8d7123.png)
+# Konstanten (Wichtig für den Import in autoverlad_app.py)
 DB_NAME = 'autoverlad.db'
 CH_TZ = pytz.timezone('Europe/Zurich')
 
 def init_db():
-    """Erstellt die Tabelle 'stats', die pandas in image_8d6600.jpg sucht."""
+    """Erstellt die Tabelle 'stats', die pandas sucht."""
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS stats
@@ -18,7 +18,7 @@ def init_db():
     conn.close()
 
 def parse_time_to_minutes(time_str):
-    """Extrahiert Zahlen aus Texten."""
+    """Extrahiert Zahlen aus dem Text (z.B. '30 Min' -> 30)."""
     if not time_str or "Keine" in time_str:
         return 0
     digits = ''.join(filter(str.isdigit, time_str))
@@ -28,7 +28,7 @@ def parse_time_to_minutes(time_str):
         return 0
 
 def save_to_db(data):
-    """Speichert die Daten in der DB."""
+    """Speichert die Ergebnisse in der Datenbank."""
     try:
         conn = sqlite3.connect(DB_NAME)
         c = conn.cursor()
@@ -42,51 +42,54 @@ def save_to_db(data):
         print(f"DB Error: {e}")
 
 def fetch_all_data():
-    """Die Hauptfunktion, die alles zusammenführt (Wichtig für den Import)."""
+    """Kombiniert Furka-API und Lötschberg-Scraping."""
     results = {}
     
-    # 1. Furka Daten (API)
+    # --- 1. FURKA LOGIK (Wiederhergestellt) ---
     try:
         f_url = "https://www.matterhorngotthardbahn.ch/api/autoverlad/waiting-times"
         f_res = requests.get(f_url, timeout=10).json()
         for item in f_res:
+            # Nutzt exakt die Keys 'station' und 'waitingTimeMin'
             name = item.get('station')
             wait = item.get('waitingTimeMin', 0)
             results[name] = {
                 "min": wait,
-                "raw": f"{wait} Min. Wartezeit" if wait > 0 else "Keine Wartezeit"
+                "raw": f"Keine Wartezeit {name}." if wait == 0 else f"{wait} Min. Wartezeit"
             }
     except:
-        results["Realp"] = {"min": 0, "raw": "Keine Info (MGB)"}
-        results["Oberwald"] = {"min": 0, "raw": "Keine Info (MGB)"}
+        results["Realp"] = {"min": 0, "raw": "Keine Info"}
+        results["Oberwald"] = {"min": 0, "raw": "Keine Info"}
 
-    # 2. Lötschberg Daten (Web Scraping basierend auf image_8ceafc.png)
+    # --- 2. LÖTSCHBERG LOGIK (Robustes Scraping) ---
     try:
         l_url = "https://www.bls.ch/de/fahren/autoverlad/loetschberg/betriebslage"
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0"}
         l_res = requests.get(l_url, headers=headers, timeout=15)
         soup = BeautifulSoup(l_res.text, 'html.parser')
         
-        # Suche nach den stLine Containern aus deinem Quelltext-Screenshot
-        lines = soup.find_all('div', class_='stLine')
-        for line in lines:
-            name_div = line.find('div', class_='stName')
-            info_div = line.find('div', class_='stInfo')
-            if name_div and info_div:
-                s_name = name_div.get_text(strip=True)
-                s_info = info_div.get_text(strip=True)
-                results[s_name] = {
-                    "min": parse_time_to_minutes(s_info),
-                    "raw": s_info
+        # Gezielt nach stName und stInfo suchen
+        names = [n.get_text(strip=True) for n in soup.find_all('div', class_='stName')]
+        infos = [i.get_text(strip=True) for i in soup.find_all('div', class_='stInfo')]
+        
+        # Die Listen zusammenführen
+        for name, info in zip(names, infos):
+            if "Kandersteg" in name or "Goppenstein" in name:
+                results[name] = {
+                    "min": parse_time_to_minutes(info),
+                    "raw": info if info else "Keine Wartezeiten"
                 }
     except:
-        if "Kandersteg" not in results:
-            results["Kandersteg"] = {"min": 0, "raw": "Keine Info (BLS)"}
-            results["Goppenstein"] = {"min": 0, "raw": "Keine Info (BLS)"}
+        pass
 
-    # Daten speichern
+    # Falls Lötschberg fehlte, mit Standard füllen
+    if "Kandersteg" not in results:
+        results["Kandersteg"] = {"min": 0, "raw": "Warte auf Daten..."}
+    if "Goppenstein" not in results:
+        results["Goppenstein"] = {"min": 0, "raw": "Warte auf Daten..."}
+
     save_to_db(results)
     return results
 
-# Alias für die App (falls benötigt)
+# Alias für die App-Importe
 get_quantized_data = fetch_all_data
