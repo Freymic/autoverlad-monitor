@@ -246,46 +246,47 @@ def get_google_maps_duration(origin, destination):
         return 60 # Fallback
 
 def get_furka_departure(arrival_time):
-    """Berechnet die nächste Abfahrt ab Realp. Springt zum nächsten Tag, falls heute Ende."""
+    """Berechnet die nächste Abfahrt ab Realp laut offiziellem Fahrplan."""
     
-    def find_in_day(time_obj):
-        weekday = time_obj.weekday()
-        # 10 Min Puffer für Verlad/Kasse
-        earliest_possible = time_obj + datetime.timedelta(minutes=10)
-        h, m = earliest_possible.hour, earliest_possible.minute
+    def find_next_train(current_dt):
+        wd = current_dt.weekday() # 0=Mo, 4=Fr, 6=So
+        # 10 Min Puffer für Ticket/Verlad
+        earliest = current_dt + datetime.timedelta(minutes=10)
+        h, m = earliest.hour, earliest.minute
 
-        # Takt-Logik basierend auf Wochentagen
-        if weekday >= 4: # Fr - So
+        # 1. Betriebszeiten definieren
+        first_h, first_m = 6, 5
+        if wd >= 4: last_h, last_m = 22, 5    # Fr-So bis 22:05
+        elif wd == 0: last_h, last_m = 21, 5  # Mo bis 21:05
+        else: last_h, last_m = 21, 5         # Di-Do bis 21:05 (aber Stundentakt)
+
+        # 2. Check: Ist es vor dem ersten Zug?
+        if h < first_h or (h == first_h and m <= first_m):
+            return earliest.replace(hour=6, minute=5, second=0, microsecond=0)
+
+        # 3. Check: Ist es nach dem letzten Zug?
+        if h > last_h or (h == last_h and m > last_m):
+            return None
+
+        # 4. Takt-Berechnung
+        if wd >= 4 or wd == 0: # Mo, Fr-So: 30-Min-Takt (.05 / .35)
             if m <= 5: dep_m = 5
             elif m <= 35: dep_m = 35
             else:
                 dep_m = 5
                 h += 1
-            last_h = 22
-        elif weekday == 0: # Mo
-            if m <= 5: dep_m = 5
-            elif m <= 35: dep_m = 35
-            else:
-                dep_m = 5
-                h += 1
-            last_h = 21
-        else: # Di - Do
+        else: # Di-Do: 60-Min-Takt (.05)
             dep_m = 5
             if m > 5: h += 1
-            last_h = 21
+            
+        return earliest.replace(hour=h, minute=dep_m, second=0, microsecond=0)
 
-        # Check: Fährt heute noch einer?
-        if h > last_h or (h == last_h and dep_m > 5):
-            return None
-        
-        return earliest_possible.replace(hour=h, minute=dep_m, second=0, microsecond=0)
-
-    # 1. Versuch: Heute
-    zug = find_in_day(arrival_time)
+    # Versuch für heute
+    zug = find_next_train(arrival_time)
     
-    # 2. Versuch: Falls heute keiner mehr, nimm morgen früh um 00:00 Uhr als Basis
+    # Wenn heute keiner mehr: Erster Zug morgen früh 06:05
     if zug is None:
-        tomorrow_morning = (arrival_time + datetime.timedelta(days=1)).replace(hour=0, minute=0, second=0)
-        zug = find_in_day(tomorrow_morning)
+        morgen = (arrival_time + datetime.timedelta(days=1)).replace(hour=0, minute=0)
+        zug = find_next_train(morgen)
         
     return zug
