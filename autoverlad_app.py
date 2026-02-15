@@ -6,10 +6,20 @@ from datetime import datetime
 from logic import fetch_all_data, init_db, save_to_db, save_to_google_sheets, DB_NAME, CH_TZ
 from streamlit_gsheets import GSheetsConnection
 from streamlit_autorefresh import st_autorefresh
+import datetime
 
 # --- AUTOMATISCHER REFRESH ALLE 5 MINUTEN ---
-# 300.000 Millisekunden = 5 Minuten
-count = st_autorefresh(interval=300000, key="fivedatarefresh")
+# Berechne Sekunden bis zum nächsten 5-Minuten-Takt
+now = datetime.datetime.now()
+seconds_past_interval = (now.minute % 5) * 60 + now.second
+# Wir warten bis zum Intervall + 10 Sekunden Puffer, damit die Quell-API sicher neue Daten hat
+seconds_to_wait = (300 - seconds_past_interval) + 10
+
+# Falls wir gerade erst am Intervall sind, warten wir wieder 5 Min
+if seconds_to_wait < 30: 
+    seconds_to_wait += 300
+
+st_autorefresh(interval=seconds_to_wait * 1000, key="dynamic_refresh")
 
 # 1. Seiteneinstellungen
 st.set_page_config(page_title="Autoverlad Monitor", layout="wide")
