@@ -246,39 +246,46 @@ def get_google_maps_duration(origin, destination):
         return 60 # Fallback
 
 def get_furka_departure(arrival_time):
-    """Berechnet die nächste Abfahrt ab Realp basierend auf dem PDF-Fahrplan."""
-    weekday = arrival_time.weekday()  # 0=Mo ... 6=So
+    """Berechnet die nächste Abfahrt ab Realp. Springt zum nächsten Tag, falls heute Ende."""
     
-    # 10 Min Puffer für Verlad/Kasse (Nutzung von datetime.timedelta)
-    earliest_possible = arrival_time + datetime.timedelta(minutes=10)
-    check_min = earliest_possible.minute
-    check_hour = earliest_possible.hour
+    def find_in_day(time_obj):
+        weekday = time_obj.weekday()
+        # 10 Min Puffer für Verlad/Kasse
+        earliest_possible = time_obj + datetime.timedelta(minutes=10)
+        h, m = earliest_possible.hour, earliest_possible.minute
 
-    # Fahrplan-Logik
-    if weekday >= 4: # Fr, Sa, So
-        if check_min <= 5: departure_min = 5
-        elif check_min <= 35: departure_min = 35
-        else:
-            departure_min = 5
-            check_hour += 1
-        last_train = 22
-    
-    elif weekday == 0: # Mo
-        if check_min <= 5: departure_min = 5
-        elif check_min <= 35: departure_min = 35
-        else:
-            departure_min = 5
-            check_hour += 1
-        last_train = 21
+        # Takt-Logik basierend auf Wochentagen
+        if weekday >= 4: # Fr - So
+            if m <= 5: dep_m = 5
+            elif m <= 35: dep_m = 35
+            else:
+                dep_m = 5
+                h += 1
+            last_h = 22
+        elif weekday == 0: # Mo
+            if m <= 5: dep_m = 5
+            elif m <= 35: dep_m = 35
+            else:
+                dep_m = 5
+                h += 1
+            last_h = 21
+        else: # Di - Do
+            dep_m = 5
+            if m > 5: h += 1
+            last_h = 21
 
-    else: # Di - Do
-        departure_min = 5
-        if check_min > 5:
-            check_hour += 1
-        last_train = 21
-
-    # Prüfung auf Betriebsschluss
-    if check_hour > last_train or (check_hour == last_train and departure_min > 5):
-        return None 
+        # Check: Fährt heute noch einer?
+        if h > last_h or (h == last_h and dep_m > 5):
+            return None
         
-    return earliest_possible.replace(hour=check_hour % 24, minute=departure_min, second=0, microsecond=0)
+        return earliest_possible.replace(hour=h, minute=dep_m, second=0, microsecond=0)
+
+    # 1. Versuch: Heute
+    zug = find_in_day(arrival_time)
+    
+    # 2. Versuch: Falls heute keiner mehr, nimm morgen früh um 00:00 Uhr als Basis
+    if zug is None:
+        tomorrow_morning = (arrival_time + datetime.timedelta(days=1)).replace(hour=0, minute=0, second=0)
+        zug = find_in_day(tomorrow_morning)
+        
+    return zug
