@@ -4,6 +4,7 @@ import sqlite3
 import altair as alt
 from datetime import datetime
 from logic import fetch_all_data, init_db, save_to_db, save_to_google_sheets, DB_NAME, CH_TZ
+from streamlit_gsheets import GSheetsConnection
 
 # 1. Seiteneinstellungen
 st.set_page_config(page_title="Autoverlad Monitor", layout="wide")
