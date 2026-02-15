@@ -5,6 +5,11 @@ import altair as alt
 from datetime import datetime
 from logic import fetch_all_data, init_db, save_to_db, save_to_google_sheets, DB_NAME, CH_TZ
 from streamlit_gsheets import GSheetsConnection
+from streamlit_autorefresh import st_autorefresh
+
+# --- AUTOMATISCHER REFRESH ALLE 5 MINUTEN ---
+# 300.000 Millisekunden = 5 Minuten
+count = st_autorefresh(interval=300000, key="fivedatarefresh")
 
 # 1. Seiteneinstellungen
 st.set_page_config(page_title="Autoverlad Monitor", layout="wide")
