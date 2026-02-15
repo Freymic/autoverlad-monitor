@@ -247,17 +247,14 @@ def get_google_maps_duration(origin, destination):
 
 def get_furka_departure(arrival_time):
     """Berechnet die nächste Abfahrt ab Realp basierend auf dem PDF-Fahrplan."""
-    weekday = arrival_time.weekday()  # 0=Mo, 1=Di... 4=Fr, 5=Sa, 6=So
-    hour = arrival_time.hour
-    minute = arrival_time.minute
+    weekday = arrival_time.weekday()  # 0=Mo ... 6=So
     
-    # Wir brauchen einen Puffer von mind. 10 Min für Verlad/Kasse
+    # 10 Min Puffer für Verlad/Kasse (Nutzung von datetime.timedelta)
     earliest_possible = arrival_time + datetime.timedelta(minutes=10)
     check_min = earliest_possible.minute
     check_hour = earliest_possible.hour
 
-    # Aktueller Zeitraum: 14.12.2025 - 14.06.2026
-    # Freitag - Sonntag: alle 30 Min (.05 & .35) bis 22:05
+    # Fahrplan-Logik
     if weekday >= 4: # Fr, Sa, So
         if check_min <= 5: departure_min = 5
         elif check_min <= 35: departure_min = 35
@@ -266,8 +263,7 @@ def get_furka_departure(arrival_time):
             check_hour += 1
         last_train = 22
     
-    # Montag: alle 30 Min (.05 & .35) bis 21:05
-    elif weekday == 0:
+    elif weekday == 0: # Mo
         if check_min <= 5: departure_min = 5
         elif check_min <= 35: departure_min = 35
         else:
@@ -275,8 +271,7 @@ def get_furka_departure(arrival_time):
             check_hour += 1
         last_train = 21
 
-    # Dienstag - Donnerstag: alle 60 Min (.05) bis 21:05
-    else:
+    else: # Di - Do
         departure_min = 5
         if check_min > 5:
             check_hour += 1
@@ -284,6 +279,6 @@ def get_furka_departure(arrival_time):
 
     # Prüfung auf Betriebsschluss
     if check_hour > last_train or (check_hour == last_train and departure_min > 5):
-        return None # Kein Zug mehr heute!
+        return None 
         
-    return earliest_possible.replace(hour=check_hour, minute=departure_min, second=0)
+    return earliest_possible.replace(hour=check_hour % 24, minute=departure_min, second=0, microsecond=0)
