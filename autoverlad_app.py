@@ -37,17 +37,18 @@ if not df.empty:
     # Sicherheits-Filter gegen Millionen-Werte/Zeitstempel-Fehler
     df_plot = df_plot[df_plot['minutes'] < 500]
     
-   chart = alt.Chart(df_plot).mark_line(
+    # ACHTUNG: Die Zeile darunter muss exakt unter dem 'd' von 'df_plot' stehen
+    chart = alt.Chart(df_plot).mark_line(
         interpolate='monotone', 
         size=3, 
-        point=True  # Wichtig: Zeigt Punkte auch wenn die Linie flach bei 0 liegt
+        point=True
     ).encode(
         x=alt.X('timestamp:T', 
                 title="Uhrzeit (CET)",
                 axis=alt.Axis(format='%H:%M', tickCount='hour', labelAngle=-45)),
         y=alt.Y('minutes:Q', 
                 title="Wartezeit (Minuten)",
-                scale=alt.Scale(domainMin=0, domainMax=180)), # Skala bis 60, damit 0-Linie sichtbar ist
+                scale=alt.Scale(domain=[0, 180])), # domainMax=180 für stabilere Sicht
         color=alt.Color('station:N', title="Station"),
         tooltip=[
             alt.Tooltip('timestamp:T', format='%H:%M', title='Zeit'),
@@ -59,7 +60,7 @@ if not df.empty:
     st.altair_chart(chart, use_container_width=True)
 else:
     st.info("Noch keine Daten vorhanden.")
-
+    
 # --- 4. DEBUG BEREICH ---
 st.markdown("---")
 with st.expander("🛠️ Debug Informationen"):
