@@ -1,6 +1,12 @@
 import streamlit as st
 import datetime
-from logic import get_latest_wait_times, get_google_maps_duration, get_furka_departure
+# Wichtig: get_loetschberg_departure muss in der logic.py vorhanden sein!
+from logic import (
+    get_latest_wait_times, 
+    get_google_maps_duration, 
+    get_furka_departure, 
+    get_loetschberg_departure
+)
 
 st.set_page_config(page_title="Routen-Check Wallis", layout="wide")
 
@@ -15,7 +21,6 @@ if st.button("Route jetzt berechnen"):
         anfahrt_f = get_google_maps_duration(start, "Autoverlad Realp")
         ankunft_realp = jetzt + datetime.timedelta(minutes=anfahrt_f)
         
-        # Nutzt die neue Logik aus der logic.py (inkl. Sprung zum nächsten Tag)
         naechster_zug_f = get_furka_departure(ankunft_realp)
         
         if naechster_zug_f:
@@ -34,22 +39,23 @@ if st.button("Route jetzt berechnen"):
         anfahrt_l = get_google_maps_duration(start, "Autoverlad Kandersteg")
         ankunft_kandersteg = jetzt + datetime.timedelta(minutes=anfahrt_l)
         
-        # Einfache Takt-Logik für Lötschberg (.20 / .50)
-        if ankunft_kandersteg.minute <= 10: dep_m = 20
-        elif ankunft_kandersteg.minute <= 40: dep_m = 50
+        # NEU: Nutzt jetzt deine präzise Logik aus logic.py
+        naechster_zug_l = get_loetschberg_departure(ankunft_kandersteg)
+        
+        if naechster_zug_l:
+            wartezeit_fahrplan_l = int((naechster_zug_l - ankunft_kandersteg).total_seconds() / 60)
+            stau_l = get_latest_wait_times("Kandersteg")
+            # Die echte Wartezeit vor Ort
+            effektive_warte_l = max(wartezeit_fahrplan_l, stau_l)
+            
+            zug_l_dauer = 20
+            ziel_l = get_google_maps_duration("Goppenstein", "Ried-Mörel")
+            total_l = anfahrt_l + effektive_warte_l + zug_l_dauer + ziel_l
+            ankunft_ziel_l = jetzt + datetime.timedelta(minutes=total_l)
         else:
-            dep_m = 20
-            # Hier fehlt noch die Logik für den Stundenwechsel, falls nötig
-        
-        # HIER WAR DER FEHLER: Variable konsistent benennen
-        wartezeit_l = get_latest_wait_times("Kandersteg") 
-        
-        zug_l_dauer = 20
-        ziel_l = get_google_maps_duration("Goppenstein", "Ried-Mörel")
-        total_l = anfahrt_l + wartezeit_l + zug_l_dauer + ziel_l
-        ankunft_ziel_l = jetzt + datetime.timedelta(minutes=total_l)
+            total_l = 9999
 
-    # Anzeige in zwei Spalten
+    # --- ANZEIGE IN ZWEI SPALTEN ---
     col_f, col_l = st.columns(2)
 
     with col_f:
@@ -58,37 +64,41 @@ if st.button("Route jetzt berechnen"):
             ist_morgen_f = naechster_zug_f.date() > ankunft_realp.date()
             tag_text_f = " (Morgen)" if ist_morgen_f else ""
             
-            st.metric("Ankunft Ried-Mörel", ankunft_ziel_f.strftime('%H:%M'), f"{total_f} Min Gesamt")
+            st.metric("Ankunft Ried-Mörel", ankunft_ziel_f.strftime('%H:%M'), f"{total_f} Min")
+            if ist_morgen_f:
+                st.info("🌙 Erster Zug morgen früh berechnet.")
+            
             st.write(f"🏠 **Start:** {start}")
             st.write(f"⬇️ Fahrt bis Realp: **{anfahrt_f} Min**")
             st.write(f"🏎️ **Ankunft Terminal:** {ankunft_realp.strftime('%H:%M')}")
-            
-            if ist_morgen_f:
-                st.info("🌙 Keine Züge mehr für heute. Erster Zug morgen berechnet.")
-            
             st.warning(f"⏳ **Wartezeit:** {effektive_warte_f} Min")
             st.write(f"🚂 **Abfahrt Realp:** {naechster_zug_f.strftime('%H:%M')}{tag_text_f}")
             st.write(f"🚂 **Zugfahrt:** {zug_f_dauer} Min")
             st.write(f"⬇️ Restliche Fahrt: **{ziel_f} Min**")
-            st.success(f"🏁 **Ziel Ried-Mörel:** {ankunft_ziel_f.strftime('%H:%M')}{tag_text_f}")
+            st.success(f"🏁 **Ziel:** {ankunft_ziel_f.strftime('%H:%M')}{tag_text_f}")
 
     with col_l:
         st.subheader("🚆 Via Lötschberg (Kandersteg)")
-        st.metric("Ankunft Ried-Mörel", ankunft_ziel_l.strftime('%H:%M'), f"{total_l} Min Gesamt")
-        st.write(f"🏠 **Start:** {start}")
-        st.write(f"⬇️ Fahrt bis Kandersteg: **{anfahrt_l} Min**")
-        st.write(f"🏎️ **Ankunft Terminal:** {ankunft_kandersteg.strftime('%H:%M')}")
-        
-        # Korrigierter Variablenname für die Anzeige
-        st.warning(f"⏳ **Wartezeit:** {wartezeit_l} Min") 
-        
-        st.write(f"🚂 **Zugfahrt:** {zug_l_dauer} Min")
-        st.write(f"⬇️ Restliche Fahrt: **{ziel_l} Min**")
-        st.success(f"🏁 **Ziel Ried-Mörel:** {ankunft_ziel_l.strftime('%H:%M')}")
+        if naechster_zug_l:
+            ist_morgen_l = naechster_zug_l.date() > ankunft_kandersteg.date()
+            tag_text_l = " (Morgen)" if ist_morgen_l else ""
+            
+            st.metric("Ankunft Ried-Mörel", ankunft_ziel_l.strftime('%H:%M'), f"{total_l} Min")
+            if ist_morgen_l:
+                st.info("🌙 Erster Zug morgen früh berechnet.")
+            
+            st.write(f"🏠 **Start:** {start}")
+            st.write(f"⬇️ Fahrt bis Kandersteg: **{anfahrt_l} Min**")
+            st.write(f"🏎️ **Ankunft Terminal:** {ankunft_kandersteg.strftime('%H:%M')}")
+            st.warning(f"⏳ **Wartezeit:** {effektive_warte_l} Min")
+            st.write(f"🚂 **Abfahrt Kandersteg:** {naechster_zug_l.strftime('%H:%M')}{tag_text_l}")
+            st.write(f"🚂 **Zugfahrt:** {zug_l_dauer} Min")
+            st.write(f"⬇️ Restliche Fahrt: **{ziel_l} Min**")
+            st.success(f"🏁 **Ziel:** {ankunft_ziel_l.strftime('%H:%M')}{tag_text_l}")
 
     st.divider()
     # Empfehlungs-Logik
     if total_f < total_l:
-        st.success(f"✅ **Empfehlung:** Über den **Furka** sparst du Zeit.")
+        st.success(f"✅ **Empfehlung:** Über den **Furka** sparst du heute ca. {total_l - total_f} Minuten.")
     else:
-        st.success(f"✅ **Empfehlung:** Über den **Lötschberg** sparst du Zeit.")
+        st.success(f"✅ **Empfehlung:** Über den **Lötschberg** sparst du heute ca. {total_f - total_l} Minuten.")
