@@ -1,37 +1,69 @@
 import streamlit as st
-from logic import get_latest_wait_times, get_google_maps_duration
 import datetime
+from logic import get_latest_wait_times, get_google_maps_duration
 
-st.title("🏔️ Live-Routenvergleich ins Wallis")
+st.set_page_config(page_title="Routen-Check Wallis", layout="wide")
 
-start = st.text_input("Dein Startpunkt:", value="Buchrain")
+st.title("🚗 Deine Reise nach Ried-Mörel")
+start = st.text_input("Startpunkt:", value="Buchrain")
 
-if st.button("Route jetzt prüfen"):
-    with st.spinner("Berechne Fahrzeiten inkl. Verkehr..."):
-        # --- ROUTE A: FURKA ---
-        anfahrt_realp = get_google_maps_duration(start, "Autoverlad Realp")
-        wartezeit_realp = get_latest_wait_times("Realp")
-        weiterfahrt_ried = get_google_maps_duration("Oberwald", "Ried-Mörel")
-        total_furka = anfahrt_realp + wartezeit_realp + 20 + weiterfahrt_ried
+if st.button("Route jetzt berechnen"):
+    with st.spinner("Frage Verkehrsdaten ab..."):
+        # Daten für Furka
+        anfahrt_f = get_google_maps_duration(start, "Autoverlad Realp")
+        warte_f = get_latest_wait_times("Realp")
+        zug_f = 20
+        ziel_f = get_google_maps_duration("Oberwald", "Ried-Mörel")
+        total_f = anfahrt_f + warte_f + zug_f + ziel_f
+
+        # Daten für Lötschberg
+        anfahrt_l = get_google_maps_duration(start, "Autoverlad Kandersteg")
+        warte_l = get_latest_wait_times("Kandersteg")
+        zug_l = 15
+        ziel_l = get_google_maps_duration("Goppenstein", "Ried-Mörel")
+        total_l = anfahrt_l + warte_l + zug_l + ziel_l
+
+    # Anzeige in zwei großen Spalten
+    col_f, col_l = st.columns(2)
+
+    with col_f:
+        st.subheader("🏔️ Via Furka (Realp)")
+        st.metric("Gesamtzeit", f"{total_f} Min", delta=None)
         
-        # --- ROUTE B: LÖTSCHBERG ---
-        anfahrt_kandersteg = get_google_maps_duration(start, "Autoverlad Kandersteg")
-        wartezeit_kandersteg = get_latest_wait_times("Kandersteg")
-        weiterfahrt_ried_b = get_google_maps_duration("Goppenstein", "Ried-Mörel")
-        total_loetsch = anfahrt_kandersteg + wartezeit_kandersteg + 15 + weiterfahrt_ried_b
-
-        # --- ANZEIGE ---
-        col1, col2 = st.columns(2)
+        # Etappen-Darstellung
+        st.write(f"🏠 **Start:** {start}")
+        st.write(f"⬇️ _Fahrzeit:_ **{anfahrt_f} Min**")
+        st.write(f"🏎️ **Ankunft Realp:** {(datetime.datetime.now() + datetime.timedelta(minutes=anfahrt_f)).strftime('%H:%M')}")
         
-        with col1:
-            st.metric("Furka", f"{total_furka} Min", f"{anfahrt_realp} Min Fahrt")
-            st.caption(f"Ankunft Realp ca.: {(datetime.datetime.now() + datetime.timedelta(minutes=anfahrt_realp)).strftime('%H:%M')}")
+        st.warning(f"⏳ **Wartezeit:** {warte_f} Min")
+        
+        st.write(f"⬇️ _Zugfahrt:_ **{zug_f} Min**")
+        st.write(f"🚂 **Abfahrt Oberwald:** ca. {(datetime.datetime.now() + datetime.timedelta(minutes=anfahrt_f + warte_f + zug_f)).strftime('%H:%M')}")
+        
+        st.write(f"⬇️ _Fahrzeit:_ **{ziel_f} Min**")
+        st.success(f"🏁 **Ziel Ried-Mörel:** {(datetime.datetime.now() + datetime.timedelta(minutes=total_f)).strftime('%H:%M')}")
 
-        with col2:
-            st.metric("Lötschberg", f"{total_loetsch} Min", f"{anfahrt_kandersteg} Min Fahrt")
-            st.caption(f"Ankunft Kandersteg ca.: {(datetime.datetime.now() + datetime.timedelta(minutes=anfahrt_kandersteg)).strftime('%H:%M')}")
+    with col_l:
+        st.subheader("🚆 Via Lötschberg (Kandersteg)")
+        st.metric("Gesamtzeit", f"{total_l} Min", delta=None)
 
-        if total_furka < total_loetsch:
-            st.success(f"👉 Nimm den **Furka**! Du sparst {total_loetsch - total_furka} Minuten.")
-        else:
-            st.success(f"👉 Nimm den **Lötschberg**! Du sparst {total_furka - total_loetsch} Minuten.")
+        st.write(f"🏠 **Start:** {start}")
+        st.write(f"⬇️ _Fahrzeit:_ **{anfahrt_l} Min**")
+        st.write(f"🏎️ **Ankunft Kandersteg:** {(datetime.datetime.now() + datetime.timedelta(minutes=anfahrt_l)).strftime('%H:%M')}")
+        
+        st.warning(f"⏳ **Wartezeit:** {warte_l} Min")
+        
+        st.write(f"⬇️ _Zugfahrt:_ **{zug_l} Min**")
+        st.write(f"🚂 **Abfahrt Goppenstein:** ca. {(datetime.datetime.now() + datetime.timedelta(minutes=anfahrt_l + warte_l + zug_l)).strftime('%H:%M')}")
+        
+        st.write(f"⬇️ _Fahrzeit:_ **{ziel_l} Min**")
+        st.success(f"🏁 **Ziel Ried-Mörel:** {(datetime.datetime.now() + datetime.timedelta(minutes=total_l)).strftime('%H:%M')}")
+
+    # Zusammenfassendes Fazit
+    st.divider()
+    if total_f < total_l:
+        st.balloons()
+        st.success(f"✅ **Empfehlung:** Über den **Furka** sparst du heute **{total_l - total_f} Minuten**!")
+    else:
+        st.balloons()
+        st.success(f"✅ **Empfehlung:** Über den **Lötschberg** sparst du heute **{total_f - total_l} Minuten**!")
