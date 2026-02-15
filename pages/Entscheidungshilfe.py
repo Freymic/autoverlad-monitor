@@ -1,5 +1,6 @@
 import streamlit as st
 from logic import get_latest_wait_times, get_google_maps_duration
+import datetime
 
 st.title("🏔️ Live-Routenvergleich ins Wallis")
 
