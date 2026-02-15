@@ -1,8 +1,6 @@
 streamlit
 pandas
-sqlite3
 altair
 pytz
-st-gsheets-connection
 requests
-streamlit-autorefresh
+st-gsheets-connection
