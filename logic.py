@@ -10,37 +10,45 @@ DB_NAME = 'autoverlad.db'
 CH_TZ = pytz.timezone('Europe/Zurich')
 
 def parse_time_to_minutes(time_str):
-    """Sicheres Mapping von Text-Phrasen zu Minutenwerten."""
+    """Lückenloses Mapping von Text-Phrasen zu Minutenwerten bis 4h."""
     if not time_str:
         return 0
     
     text = time_str.lower()
     
-    # 1. HARDCODED MAPPING (Priorität 1)
-    # Da die Texte standardisiert sind, ist dies die stabilste Lösung.
-    if "keine wartezeit" in text or "no waiting" in text:
-        return 0
-    if "1 stunde 30 minuten" in text:
-        return 90
-    if "2 stunden 30 minuten" in text:
-        return 150
-    if "1 stunde" in text:
-        return 60
-    if "2 stunden" in text:
-        return 120
-    if "30 minuten" in text or "30 min" in text:
-        return 30
+    # 1. ERWEITERTES MAPPING (Priorität 1)
+    # Wir sortieren von lang nach kurz, um Fehl-Matches zu vermeiden.
+    mapping = {
+        "4 stunden": 240,
+        "3 stunden 30 minuten": 210,
+        "3 stunden": 180,
+        "2 stunden 30 minuten": 150,
+        "2 stunden": 120,
+        "1 stunde 30 minuten": 90,
+        "1 stunde": 60,
+        "45 minuten": 45,
+        "30 minuten": 30,
+        "15 minuten": 15,
+        "keine wartezeit": 0,
+        "no waiting": 0
+    }
+    
+    # Suche nach den exakten Phrasen im Text
+    for phrase, minutes in mapping.items():
+        if phrase in text:
+            return minutes
 
     # 2. DYNAMISCHER FALLBACK (Priorität 2)
-    # Falls eine krumme Zahl auftaucht, die nicht im Mapping ist.
+    # Falls krumme Werte wie "20 Minuten" oder "1 Stunde 10 Minuten" kommen
     total_min = 0
+    
     # Stunden finden (1 stunde oder 2 stunden)
     hour_match = re.search(r'(\d+)\s*stunde', text)
     if hour_match:
         total_min += int(hour_match.group(1)) * 60
     
-    # Minuten finden (nur Zahlen, die nicht Teil einer Uhrzeit XX:XX sind)
-    min_match = re.search(r'(?<!:)(\b\d+)\s*min', text)
+    # Minuten finden (ignoriert Uhrzeiten XX:XX durch Lookbehind)
+    min_match = re.search(r'(?<!:)(\b\d+)\s*(?:min|minute)', text)
     if min_match:
         total_min += int(min_match.group(1))
         
