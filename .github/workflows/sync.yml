@@ -1,8 +1,8 @@
 name: 5-Minute Data Sync
 on:
   schedule:
-    - cron: '*/5 * * * *'  # Läuft alle 5 Minuten
-  workflow_dispatch:      # Ermöglicht manuellen Start zum Testen
+    - cron: '*/5 * * * *'  # Alle 5 Min
+  workflow_dispatch:      # Ermöglicht manuellen Start per Button
 
 jobs:
   sync:
@@ -19,10 +19,9 @@ jobs:
       - name: Install Dependencies
         run: pip install requests pandas streamlit-gsheets pytz
 
-      - name: Run Sync Script
+      - name: Run Sync
         env:
-          # Wir müssen die GSheets-Secrets hier für GitHub hinterlegen
-          CONNECTIONS_GSHEETS_SPREADSHEET: ${{ secrets.GSHEET_URL }}
-          # ... (weitere Keys folgen)
+          # Wir reichen die GSheet-Daten an das Skript weiter
+          G_JSON: ${{ secrets.GSHEET_JSON }}
         run: |
-          python -c "from logic import fetch_all_data, save_to_google_sheets; data = fetch_all_data(); save_to_google_sheets(data)"
+          python -c "import os, json; from logic import fetch_all_data, save_to_google_sheets; data = fetch_all_data(); save_to_google_sheets(data)"
