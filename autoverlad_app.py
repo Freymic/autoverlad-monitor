@@ -80,6 +80,10 @@ with st.expander("🛠️ Debug Informationen"):
         st.dataframe(df_history, use_container_width=True)
 
 
+
+from streamlit_autorefresh import st_autorefresh
+import datetime # Importiere das gesamte Modul für maximale Stabilität
+
 # --- 5. STATUS & CLOUD-INFO ---
 try:
     current_ws = st.secrets["connections"]["gsheets"]["worksheet"]
@@ -88,18 +92,17 @@ except Exception:
     st.info("ℹ️ Cloud-Backup: Standard-Modus aktiv.")
 
 # --- 6. DYNAMISCHER AUTOREFRESH (xx:00, xx:05, ...) ---
-now = datetime.now(CH_TZ)
-# Berechne Sekunden bis zum nächsten 5-Minuten-Takt
-# Beispiel: Es ist 20:03 -> seconds_past = 3*60 = 180s. 
-# wait = (300 - 180) + 10s Puffer = 130s.
-seconds_past_interval = (now.minute % 5) * 60 + now.second
-seconds_to_wait = (300 - seconds_past_interval) + 10 # +10s Puffer für API-Aktualisierung
+# Wir nutzen hier datetime.datetime.now(), um den AttributeError zu vermeiden
+now = datetime.datetime.now(CH_TZ)
 
-# Falls wir aus Versehen < 0 landen
+# Berechne Sekunden bis zum nächsten 5-Minuten-Takt
+seconds_past_interval = (now.minute % 5) * 60 + now.second
+seconds_to_wait = (300 - seconds_past_interval) + 10 # +10s Puffer
+
 if seconds_to_wait < 10:
     seconds_to_wait += 300
 
-# Trigger Refresh in Millisekunden
+# Trigger Refresh
 st_autorefresh(interval=seconds_to_wait * 1000, key="auto_sync_trigger")
 
 st.caption(f"Letztes Update: {now.strftime('%H:%M:%S')} | Nächstes Update in ~{int(seconds_to_wait)}s")
