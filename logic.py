@@ -3,21 +3,48 @@ import xml.etree.ElementTree as ET
 import re
 import sqlite3
 import json
-from datetime import datetime
+import pandas as pd
+from datetime import datetime, timedelta
 import pytz
+import streamlit as st
+from streamlit_gsheets import GSheetsConnection
 
 # Konstanten
 DB_NAME = 'autoverlad.db'
 CH_TZ = pytz.timezone('Europe/Zurich')
 
 def init_db():
-    """Initialisiert die Datenbank-Tabelle."""
+    """Initialisiert die Datenbank-Tabelle und stellt Daten aus GSheets wieder her, falls DB leer."""
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS stats
                  (timestamp DATETIME, station TEXT, minutes INTEGER, raw_text TEXT)''')
     conn.commit()
+    
+    # Check ob DB leer ist (z.B. nach Reboot auf Streamlit Cloud)
+    c.execute("SELECT COUNT(*) FROM stats")
+    if c.fetchone()[0] == 0:
+        restore_from_gsheets(conn)
+        
     conn.close()
+
+def restore_from_gsheets(sqlite_conn):
+    """Lädt die letzten 24h aus Google Sheets zurück in die lokale SQLite."""
+    try:
+        sheet_name = st.secrets.get("connections", {}).get("gsheets", {}).get("worksheet", "Sheet1")
+        conn_gs = st.connection("gsheets", type=GSheetsConnection)
+        df = conn_gs.read(worksheet=sheet_name)
+        
+        if not df.empty:
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            cutoff = datetime.now() - timedelta(hours=24)
+            df_recent = df[df['timestamp'] > cutoff]
+            
+            if not df_recent.empty:
+                df_recent.to_sql('stats', sqlite_conn, if_exists='append', index=False)
+                st.info(f"🔄 Daten aus Cloud-Tab '{sheet_name}' wiederhergestellt.")
+    except Exception as e:
+        st.warning(f"Cloud-Restore übersprungen: {e}")
 
 def parse_time_to_minutes(time_str):
     """Lückenloses Mapping von Text-Phrasen zu Minutenwerten bis 4h."""
@@ -26,8 +53,7 @@ def parse_time_to_minutes(time_str):
     
     text = time_str.lower()
     
-    # 1. ERWEITERTES MAPPING (Priorität 1)
-    # Sortierung von lang nach kurz, um Teil-Matches zu verhindern.
+    # 1. ERWEITERTES MAPPING
     mapping = {
         "4 stunden": 240,
         "3 stunden 30 minuten": 210,
@@ -47,7 +73,7 @@ def parse_time_to_minutes(time_str):
         if phrase in text:
             return minutes
 
-    # 2. DYNAMISCHER RECHNER (Priorität 2 - Fallback)
+    # 2. DYNAMISCHER RECHNER (Fallback)
     total_min = 0
     hour_match = re.search(r'(\d+)\s*stunde', text)
     if hour_match:
@@ -85,7 +111,6 @@ def fetch_all_data():
         f_resp = requests.get(f_url, timeout=10)
         root = ET.fromstring(f_resp.content)
         
-        # Furka-Standardwerte initialisieren
         furka_found = {"Oberwald": False, "Realp": False}
         
         for item in root.findall('.//item'):
@@ -93,7 +118,6 @@ def fetch_all_data():
             desc = item.find('description').text or ""
             full_text = f"{title} {desc}"
             
-            # Filter gegen reine Fahrplan-Hinweise ("stündlich")
             if any(x in full_text.lower() for x in ["stündlich", "abfahrt"]):
                 continue
             
@@ -106,7 +130,6 @@ def fetch_all_data():
                     results["Realp"] = {"min": val, "raw": full_text}
                     furka_found["Realp"] = True
         
-        # Fallback falls keine Meldung im Feed war
         if not furka_found["Oberwald"]: results["Oberwald"] = {"min": 0, "raw": "Keine Meldung"}
         if not furka_found["Realp"]: results["Realp"] = {"min": 0, "raw": "Keine Meldung"}
             
@@ -127,7 +150,6 @@ def save_to_db(data):
         timestamp_str = quantized_now.strftime('%Y-%m-%d %H:%M:%S')
         
         for station, info in data.items():
-            # Dubletten-Check für dieses Zeitfenster
             c.execute("SELECT 1 FROM stats WHERE timestamp = ? AND station = ?", (timestamp_str, station))
             if not c.fetchone():
                 c.execute("INSERT INTO stats VALUES (?, ?, ?, ?)",
@@ -137,3 +159,50 @@ def save_to_db(data):
         conn.close()
     except Exception as e:
         print(f"DB Error: {e}")
+
+def save_to_google_sheets(data):
+    try:
+        sheet_name = st.secrets.get("connections", {}).get("gsheets", {}).get("worksheet", "Development")
+        conn_gs = st.connection("gsheets", type=GSheetsConnection)
+        
+        # 1. Zeitstempel vorbereiten
+        now = datetime.now(CH_TZ)
+        minute_quantized = (now.minute // 5) * 5
+        ts_str = now.replace(minute=minute_quantized, second=0, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
+        
+        # 2. Neue Daten in DataFrame umwandeln
+        new_entries = []
+        for station, info in data.items():
+            new_entries.append({
+                "timestamp": ts_str,
+                "station": station,
+                "minutes": info.get('min', 0),
+                "raw_text": info.get('raw', '')
+            })
+        df_new = pd.DataFrame(new_entries)
+        
+        # 3. Bestehende Daten laden (Cache umgehen mit ttl=0)
+        try:
+            # ttl=0 stellt sicher, dass wir wirklich den aktuellen Stand vom Server holen
+            df_existing = conn_gs.read(worksheet=sheet_name, ttl=0)
+        except Exception:
+            df_existing = pd.DataFrame(columns=["timestamp", "station", "minutes", "raw_text"])
+        
+        # 4. Anhängen und Index zurücksetzen
+        # ignore_index=True ist extrem wichtig, damit Google nicht denkt, es sei die gleiche Zeile
+        df_final = pd.concat([df_existing, df_new], ignore_index=True)
+        
+        # 5. Duplikate entfernen (Zeitpunkt + Station)
+        df_final = df_final.drop_duplicates(subset=['timestamp', 'station'], keep='last')
+        
+        # 6. Das komplette Sheet aktualisieren
+        conn_gs.update(worksheet=sheet_name, data=df_final)
+        
+        # Kleiner Debug-Hinweis für dich (kannst du später löschen)
+        # st.toast(f"Cloud-Sync: {len(df_final)} Zeilen gesamt")
+        
+        return True
+        
+    except Exception as e:
+        st.error(f"GSheets Sync Fehler: {e}")
+        return False
