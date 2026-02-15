@@ -161,15 +161,20 @@ def save_to_db(data):
         print(f"DB Error: {e}")
 
 def save_to_google_sheets(data):
-    """Speichert Daten permanent in den in Secrets definierten Cloud-Tab."""
+    """
+    Speichert Daten permanent in GSheets. Lädt bestehende Daten, 
+    fügt neue an und entfernt Duplikate.
+    """
     try:
         sheet_name = st.secrets.get("connections", {}).get("gsheets", {}).get("worksheet", "Sheet1")
         conn_gs = st.connection("gsheets", type=GSheetsConnection)
         
+        # 1. Zeitstempel vorbereiten (5-Min-Takt)
         now = datetime.now(CH_TZ)
         minute_quantized = (now.minute // 5) * 5
         ts_str = now.replace(minute=minute_quantized, second=0, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
         
+        # 2. Neue Einträge vorbereiten
         new_entries = []
         for station, info in data.items():
             new_entries.append({
@@ -178,15 +183,24 @@ def save_to_google_sheets(data):
                 "minutes": info.get('min', 0),
                 "raw_text": info.get('raw', '')
             })
-        
         df_new = pd.DataFrame(new_entries)
-        df_existing = conn_gs.read(worksheet=sheet_name)
         
-        # Zusammenführen und Duplikate (Zeitpunkt + Station) vermeiden
-        df_final = pd.concat([df_existing, df_new]).drop_duplicates(subset=['timestamp', 'station'], keep='first')
+        # 3. Bestehende Daten laden (mit Fehlerbehandlung falls Sheet leer)
+        try:
+            df_existing = conn_gs.read(worksheet=sheet_name)
+        except Exception:
+            df_existing = pd.DataFrame(columns=["timestamp", "station", "minutes", "raw_text"])
         
+        # 4. Zusammenführen & Duplikate entfernen
+        # 'keep=last' sorgt dafür, dass falls sich eine Meldung innerhalb 
+        # des 5-Min-Fensters ändert, der aktuellste Text im Sheet landet.
+        df_final = pd.concat([df_existing, df_new], ignore_index=True)
+        df_final = df_final.drop_duplicates(subset=['timestamp', 'station'], keep='last')
+        
+        # 5. Alles zurückschreiben
         conn_gs.update(worksheet=sheet_name, data=df_final)
         return True
+        
     except Exception as e:
         st.error(f"GSheets Sync Fehler: {e}")
         return False
