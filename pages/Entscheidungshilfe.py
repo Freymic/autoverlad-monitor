@@ -84,7 +84,7 @@ if st.button("Route jetzt berechnen"):
         
         st.write(f"🚂 **Zugfahrt:** {zug_l_dauer} Min")
         st.write(f"⬇️ Restliche Fahrt: **{ziel_l} Min**")
-        st.success(f"🏁 **Ziel:** {ankunft_ziel_l.strftime('%H:%M')}")
+        st.success(f"🏁 **Ziel Ried-Mörel:** {ankunft_ziel_l.strftime('%H:%M')}")
 
     st.divider()
     # Empfehlungs-Logik
