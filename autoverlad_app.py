@@ -30,45 +30,40 @@ for i, (name, d) in enumerate(data.items()):
 # --- 2. DATEN LADEN ---
 with sqlite3.connect(DB_NAME) as conn:
     cutoff_24h = (datetime.now(CH_TZ) - pd.Timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S')
-    df_chart = pd.read_sql_query(f"SELECT * FROM stats WHERE timestamp >= '{cutoff_24h}' ORDER BY timestamp ASC", conn)
-    df_history = pd.read_sql_query("SELECT * FROM stats ORDER BY timestamp DESC", conn)
+    # Wir holen die Spalten explizit einzeln ab
+    df_chart = pd.read_sql_query(
+        f"SELECT timestamp, station, minutes FROM stats WHERE timestamp >= '{cutoff_24h}' ORDER BY timestamp ASC", 
+        conn
+    )
+    df_history = pd.read_sql_query("SELECT timestamp, station, minutes, raw_text FROM stats ORDER BY timestamp DESC LIMIT 100", conn)
 
 # --- 3. TREND CHART ---
 st.subheader("📈 24h Trend")
 
 if not df_chart.empty:
-    # Daten-Vorbereitung für Altair
     df_plot = df_chart.copy()
+    
+    # 1. SICHERHEIT: Timestamp in echtes Datum umwandeln
     df_plot['timestamp'] = pd.to_datetime(df_plot['timestamp']).dt.tz_localize(None)
-    df_plot['minutes'] = pd.to_numeric(df_plot['minutes'], errors='coerce').fillna(0).astype(int)
     
-    # DYNAMISCHE SKALIERUNG BERECHNEN
-    max_value = df_plot['minutes'].max()
-    # Puffer berechnen, aber mindestens bis 60 Min anzeigen
-    dynamic_max = max(60, int(max_value * 1.2))
+    # 2. SICHERHEIT: Minuten strikt in Zahlen umwandeln und ALLES über 480 (8h) kappen
+    # Das verhindert, dass Zeitstempel-Zahlen das Diagramm sprengen
+    df_plot['minutes'] = pd.to_numeric(df_plot['minutes'], errors='coerce').fillna(0)
+    df_plot = df_plot[df_plot['minutes'] < 500] # Sicherheits-Filter gegen Millionen-Werte
     
-    # SAUBERE ACHSEN-SCHRITTE (0, 30, 60, 90, 120...)
-    # Wir erstellen eine Liste von Ticks in 30er Schritten bis zum dynamic_max
-    y_ticks = list(range(0, dynamic_max + 31, 30))
+    # Dynamischer Deckel (Puffer)
+    current_max = int(df_plot['minutes'].max()) if not df_plot.empty else 0
+    upper_limit = max(60, ((current_max // 30) + 1) * 30 + 30)
 
     chart = alt.Chart(df_plot).mark_line(
-        interpolate='monotone', 
-        size=3, 
-        point=True 
+        interpolate='monotone', size=3, point=True 
     ).encode(
-        x=alt.X('timestamp:T', 
-                title="Uhrzeit (CET)",
-                axis=alt.Axis(format='%H:%M', tickCount='hour', labelAngle=-45)),
+        x=alt.X('timestamp:T', title="Uhrzeit"),
         y=alt.Y('minutes:Q', 
                 title="Wartezeit (Minuten)",
-                scale=alt.Scale(domain=[0, dynamic_max]),
-                axis=alt.Axis(values=y_ticks)), # Erzwingt saubere 30er Schritte
+                scale=alt.Scale(domain=[0, upper_limit])),
         color=alt.Color('station:N', title="Station"),
-        tooltip=[
-            alt.Tooltip('timestamp:T', format='%H:%M', title='Zeit'),
-            alt.Tooltip('station:N', title='Station'),
-            alt.Tooltip('minutes:Q', title='Wartezeit (Min)')
-        ]
+        tooltip=['timestamp:T', 'station:N', 'minutes:Q']
     ).properties(height=400).interactive()
     
     st.altair_chart(chart, use_container_width=True)
