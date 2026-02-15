@@ -217,14 +217,30 @@ def get_latest_wait_times(station):
     return int(df['minutes'].iloc[0]) if not df.empty else 0
 
 def get_google_maps_duration(origin, destination):
-    # Hier kommt später dein Google Maps API Key rein
-    # Aktuell nutzen wir einen Standardwert oder eine einfache Schätzung
-    # Für die echte API: 
-    # url = f"https://maps.googleapis.com/maps/api/distancematrix/json?origins={origin}&destinations={destination}&key=DEIN_KEY"
-    # res = requests.get(url).json()
-    # return res['rows'][0]['elements'][0]['duration']['value'] // 60
+    """Holt die echte Fahrzeit inkl. Verkehr von Google Maps."""
+    api_key = st.secrets["G_MAPS_API_KEY"]
     
-    # Dummy-Werte für den ersten Test:
-    if "Realp" in destination: return 68  # Buchrain -> Realp
-    if "Kandersteg" in destination: return 106 # Buchrain -> Kandersteg
-    return 60
+    url = "https://maps.googleapis.com/maps/api/distancematrix/json"
+    params = {
+        "origins": origin,
+        "destinations": destination,
+        "mode": "driving",
+        "departure_time": "now",
+        "traffic_model": "best_guess",
+        "key": api_key
+    }
+    
+    try:
+        response = requests.get(url, params=params)
+        data = response.json()
+        
+        if data["status"] == "OK":
+            # Zeit in Sekunden umrechnen in Minuten
+            seconds = data["rows"][0]["elements"][0]["duration_in_traffic"]["value"]
+            return seconds // 60
+        else:
+            st.error(f"Google Maps Fehler: {data['status']}")
+            return 60 # Fallback
+    except Exception as e:
+        st.error(f"Verbindung zu Google fehlgeschlagen: {e}")
+        return 60 # Fallback
