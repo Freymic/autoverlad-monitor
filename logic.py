@@ -19,83 +19,72 @@ def init_db():
     conn.commit()
     conn.close()
 
+
 def parse_time_to_minutes(time_str):
-    """Extrahiert alle Stunden und Minuten aus einem Text und addiert sie."""
+    """Extrahiert alle Zeitangaben und addiert sie (z.B. 1 Std + 30 Min = 90)."""
     if not time_str:
         return 0
     
     text = time_str.lower()
     
-    # 1. Sofortiger Ausschluss bei "Keine Wartezeit"
-    if "keine wartezeit" in text or "0 min" in text or "no waiting" in text:
+    # Sofort-Check für "Keine Wartezeit"
+    if any(phrase in text for phrase in ["keine wartezeit", "0 min", "no waiting"]):
         return 0
 
-    total_minutes = 0
+    total_min = 0
 
-    # 2. Stunden finden (z.B. "1 Stunde") und in Minuten umrechnen
-    hour_matches = re.findall(r'(\d+)\s*(?:std|stunde)', text)
-    for h in hour_matches:
-        total_minutes += int(h) * 60
+    # 1. STUNDEN finden (sucht nach Zahlen vor 'stunde' oder 'std')
+    # findall stellt sicher, dass wir auch mehrere Nennungen finden
+    hours = re.findall(r'(\d+)\s*(?:stunde|std)', text)
+    if hours:
+        # Wir nehmen nur die erste Nennung, um Verdopplungen im Text zu vermeiden
+        total_min += int(hours[0]) * 60
 
-    # 3. Minuten finden (z.B. "30 Minuten")
-    # Der Lookbehind (?<!:) ignoriert Zahlen, die Teil einer Uhrzeit (16:35) sind
-    min_matches = re.findall(r'(?<!:)(\b\d+)\s*(?:min|minute)', text)
-    for m in min_matches:
-        total_minutes += int(m)
+    # 2. MINUTEN finden (sucht nach Zahlen vor 'min')
+    # Der Lookbehind (?<!:) ignoriert Uhrzeiten wie 16:35
+    minutes = re.findall(r'(?<!:)(\b\d+)\s*min', text)
+    if minutes:
+        # Falls Stunden gefunden wurden, nehmen wir die Minuten danach
+        # Falls keine Stunden da sind, nehmen wir die erste Minutenzahl
+        total_min += int(minutes[0])
 
-    return total_minutes
+    return total_min
 
 def fetch_all_data():
-    """Holt Wartezeiten von Furka (RSS) und Lötschberg (API)."""
     results = {}
     
-    # --- 1. LÖTSCHBERG (JSON API) ---
+    # --- TEIL 1: LÖTSCHBERG ---
     try:
         l_url = "https://www.bls.ch/api/avwV2/delays?dataSourceId={808904A8-0874-44AC-8DE3-4A5FC33D8CF1}"
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        l_res = requests.get(l_url, headers=headers, timeout=10).json()
-        
-        for entry in l_res.get("Stations", []):
-            name = entry.get("Station")
+        l_res = requests.get(l_url, timeout=10).json()
+        for s in l_res.get("Stations", []):
+            name = s.get("Station")
             if name in ["Kandersteg", "Goppenstein"]:
-                msg = entry.get("DelayMessage", "")
-                results[name] = {
-                    "min": parse_time_to_minutes(msg), 
-                    "raw": msg if msg else "Keine Meldung"
-                }
-    except Exception as e:
-        print(f"Fehler Lötschberg-API: {e}")
+                msg = s.get("DelayMessage", "No waiting times")
+                results[name] = {"min": parse_time_to_minutes(msg), "raw": msg}
+    except: pass
 
-    # --- 2. FURKA (RSS Feed) ---
+    # --- TEIL 2: FURKA ---
     try:
         f_url = "https://mgb-prod.oevfahrplan.ch/incident-manager-api/incidentmanager/rss?publicId=av_furka&lang=de"
         f_resp = requests.get(f_url, timeout=10)
         root = ET.fromstring(f_resp.content)
         
-        # Initialisiere Furka-Stationen, falls sie nicht im Feed sind
-        if "Oberwald" not in results: results["Oberwald"] = {"min": 0, "raw": "Keine Meldung"}
-        if "Realp" not in results: results["Realp"] = {"min": 0, "raw": "Keine Meldung"}
-        
         for item in root.findall('.//item'):
-            title = item.find('title').text or ""
-            desc = item.find('description').text or ""
-            full_text = f"{title} {desc}"
+            full_text = f"{item.find('title').text} {item.find('description').text}"
             
-            # WICHTIG: Überspringe reine Fahrplan-Informationen
-            noise_words = ["stündlich", "abfahrt", "fahrplan", "verkehren"]
-            if any(word in full_text.lower() for word in noise_words):
+            # Filter gegen die stündlichen Fahrplan-Meldungen
+            if any(x in full_text.lower() for x in ["stündlich", "abfahrt"]):
                 continue
-                
-            # Verarbeite nur echte Wartezeit-Meldungen
+            
             if "wartezeit" in full_text.lower():
                 val = parse_time_to_minutes(full_text)
                 if "Oberwald" in full_text:
                     results["Oberwald"] = {"min": val, "raw": full_text}
                 elif "Realp" in full_text:
                     results["Realp"] = {"min": val, "raw": full_text}
-    except Exception as e:
-        print(f"Fehler Furka-RSS: {e}")
-        
+    except: pass
+    
     return results
     
 def save_to_db(data):
