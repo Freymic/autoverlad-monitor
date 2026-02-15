@@ -206,3 +206,25 @@ def save_to_google_sheets(data):
     except Exception as e:
         st.error(f"GSheets Sync Fehler: {e}")
         return False
+
+def get_latest_wait_times(station):
+    # Holt den aktuellsten Wert für eine Station aus der SQLite DB
+    with sqlite3.connect(DB_NAME) as conn:
+        df = pd.read_sql_query(
+            "SELECT minutes FROM stats WHERE station = ? ORDER BY timestamp DESC LIMIT 1", 
+            conn, params=(station,)
+        )
+    return int(df['minutes'].iloc[0]) if not df.empty else 0
+
+def get_google_maps_duration(origin, destination):
+    # Hier kommt später dein Google Maps API Key rein
+    # Aktuell nutzen wir einen Standardwert oder eine einfache Schätzung
+    # Für die echte API: 
+    # url = f"https://maps.googleapis.com/maps/api/distancematrix/json?origins={origin}&destinations={destination}&key=DEIN_KEY"
+    # res = requests.get(url).json()
+    # return res['rows'][0]['elements'][0]['duration']['value'] // 60
+    
+    # Dummy-Werte für den ersten Test:
+    if "Realp" in destination: return 68  # Buchrain -> Realp
+    if "Kandersteg" in destination: return 106 # Buchrain -> Kandersteg
+    return 60
