@@ -44,21 +44,25 @@ if not df_chart.empty:
     
     # DYNAMISCHE SKALIERUNG BERECHNEN
     max_value = df_plot['minutes'].max()
-    # Wir nehmen das Maximum + 20%, aber mindestens 60, damit es gut aussieht
+    # Puffer berechnen, aber mindestens bis 60 Min anzeigen
     dynamic_max = max(60, int(max_value * 1.2))
     
+    # SAUBERE ACHSEN-SCHRITTE (0, 30, 60, 90, 120...)
+    # Wir erstellen eine Liste von Ticks in 30er Schritten bis zum dynamic_max
+    y_ticks = list(range(0, dynamic_max + 31, 30))
+
     chart = alt.Chart(df_plot).mark_line(
         interpolate='monotone', 
         size=3, 
-        point=True
+        point=True 
     ).encode(
         x=alt.X('timestamp:T', 
                 title="Uhrzeit (CET)",
                 axis=alt.Axis(format='%H:%M', tickCount='hour', labelAngle=-45)),
         y=alt.Y('minutes:Q', 
                 title="Wartezeit (Minuten)",
-                # Hier ist die Änderung: dynamic_max statt fester 60
-                scale=alt.Scale(domainMin=0, domainMax=dynamic_max)), 
+                scale=alt.Scale(domain=[0, dynamic_max]),
+                axis=alt.Axis(values=y_ticks)), # Erzwingt saubere 30er Schritte
         color=alt.Color('station:N', title="Station"),
         tooltip=[
             alt.Tooltip('timestamp:T', format='%H:%M', title='Zeit'),
