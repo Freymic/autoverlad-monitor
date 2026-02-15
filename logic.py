@@ -290,3 +290,58 @@ def get_furka_departure(arrival_time):
         zug = find_next_train(morgen)
         
     return zug
+
+def get_loetschberg_departure(arrival_time):
+    """Berechnet die nächste Abfahrt ab Kandersteg (Mo-So)."""
+    
+    def find_next_train_l(current_dt):
+        wd = current_dt.weekday() # 0=Mo, 4=Fr, 5=Sa, 6=So
+        # 10 Min Puffer für Ticket/Verlad
+        earliest = current_dt + datetime.timedelta(minutes=10)
+        h, m = earliest.hour, earliest.minute
+
+        # 1. Erste Abfahrt am Morgen (05:25)
+        if h < 5 or (h == 5 and m <= 25):
+            return earliest.replace(hour=5, minute=25, second=0, microsecond=0)
+
+        # 2. Spätverkehr (Mo-Do) laut deiner Liste
+        if wd <= 3: 
+            if h == 21 and m > 43:
+                return earliest.replace(hour=22, minute=48, second=0, microsecond=0)
+            if h == 22:
+                if m <= 48: return earliest.replace(hour=22, minute=48, second=0, microsecond=0)
+                else: return earliest.replace(hour=23, minute=28, second=0, microsecond=0)
+            if h == 23:
+                if m <= 28: return earliest.replace(hour=23, minute=28, second=0, microsecond=0)
+                else: return None
+
+        # 3. Takt-Logik (Fr-So: 15-Min / Mo-Do: 30-Min)
+        # Freitag (4), Samstag (5), Sonntag (6)
+        if wd >= 4:
+            # Deine Screenshots zeigen: .13, .27, .43, .58
+            if m <= 13: dep_m = 13
+            elif m <= 27: dep_m = 27
+            elif m <= 43: dep_m = 43
+            elif m <= 58: dep_m = 58
+            else:
+                dep_m = 13
+                h += 1
+        else:
+            # Montag bis Donnerstag: .13, .43
+            if m <= 13: dep_m = 13
+            elif m <= 43: dep_m = 43
+            else:
+                dep_m = 13
+                h += 1
+            
+        return earliest.replace(hour=h % 24, minute=dep_m, second=0, microsecond=0)
+
+    # Versuch für heute
+    zug = find_next_train_l(arrival_time)
+    
+    # Falls heute keiner mehr: Erster Zug morgen
+    if zug is None:
+        morgen = (arrival_time + datetime.timedelta(days=1)).replace(hour=0, minute=0)
+        zug = find_next_train_l(morgen)
+        
+    return zug
