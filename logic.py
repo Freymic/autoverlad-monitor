@@ -161,20 +161,16 @@ def save_to_db(data):
         print(f"DB Error: {e}")
 
 def save_to_google_sheets(data):
-    """
-    Speichert Daten permanent in GSheets. Lädt bestehende Daten, 
-    fügt neue an und entfernt Duplikate.
-    """
     try:
-        sheet_name = st.secrets.get("connections", {}).get("gsheets", {}).get("worksheet", "Sheet1")
+        sheet_name = st.secrets.get("connections", {}).get("gsheets", {}).get("worksheet", "Development")
         conn_gs = st.connection("gsheets", type=GSheetsConnection)
         
-        # 1. Zeitstempel vorbereiten (5-Min-Takt)
+        # 1. Zeitstempel vorbereiten
         now = datetime.now(CH_TZ)
         minute_quantized = (now.minute // 5) * 5
         ts_str = now.replace(minute=minute_quantized, second=0, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
         
-        # 2. Neue Einträge vorbereiten
+        # 2. Neue Daten in DataFrame umwandeln
         new_entries = []
         for station, info in data.items():
             new_entries.append({
@@ -185,20 +181,26 @@ def save_to_google_sheets(data):
             })
         df_new = pd.DataFrame(new_entries)
         
-        # 3. Bestehende Daten laden (mit Fehlerbehandlung falls Sheet leer)
+        # 3. Bestehende Daten laden (Cache umgehen mit ttl=0)
         try:
-            df_existing = conn_gs.read(worksheet=sheet_name)
+            # ttl=0 stellt sicher, dass wir wirklich den aktuellen Stand vom Server holen
+            df_existing = conn_gs.read(worksheet=sheet_name, ttl=0)
         except Exception:
             df_existing = pd.DataFrame(columns=["timestamp", "station", "minutes", "raw_text"])
         
-        # 4. Zusammenführen & Duplikate entfernen
-        # 'keep=last' sorgt dafür, dass falls sich eine Meldung innerhalb 
-        # des 5-Min-Fensters ändert, der aktuellste Text im Sheet landet.
+        # 4. Anhängen und Index zurücksetzen
+        # ignore_index=True ist extrem wichtig, damit Google nicht denkt, es sei die gleiche Zeile
         df_final = pd.concat([df_existing, df_new], ignore_index=True)
+        
+        # 5. Duplikate entfernen (Zeitpunkt + Station)
         df_final = df_final.drop_duplicates(subset=['timestamp', 'station'], keep='last')
         
-        # 5. Alles zurückschreiben
+        # 6. Das komplette Sheet aktualisieren
         conn_gs.update(worksheet=sheet_name, data=df_final)
+        
+        # Kleiner Debug-Hinweis für dich (kannst du später löschen)
+        # st.toast(f"Cloud-Sync: {len(df_final)} Zeilen gesamt")
+        
         return True
         
     except Exception as e:
