@@ -20,14 +20,28 @@ def init_db():
     conn.close()
 
 def parse_time_to_minutes(time_str):
+    """Extrahiert Minuten gezielt aus Sätzen über Wartezeiten."""
     if not time_str:
         return 0
-    # Erkennt "Keine", "No waiting", etc. als 0
-    if any(word in time_str.lower() for word in ["keine", "no", "none"]):
+        
+    time_str_lower = time_str.lower()
+    
+    # 1. Prüfen auf "keine Wartezeit"
+    if any(phrase in time_str_lower for phrase in ["keine wartezeit", "0 min", "no waiting"]):
         return 0
-    # Extrahiert alle Ziffern (z.B. "15 Min" -> 15)
-    digits = ''.join(filter(str.isdigit, time_str))
-    return int(digits) if digits else 0
+        
+    # 2. Suche nach Mustern wie "zirka 1 Stunde" oder "ca. 1 Stunde"
+    hour_match = re.search(r'(?:zirka|ca\.|etwa|über)\s*(\d+)\s*stunde', time_str_lower)
+    if hour_match:
+        return int(hour_match.group(1)) * 60
+
+    # 3. Suche nach "X Minuten" oder "X Min" direkt im Kontext von Wartezeit
+    # Dieser Regex sucht eine Zahl, die vor "min" steht
+    minute_match = re.search(r'(\d+)\s*min', time_str_lower)
+    if minute_match:
+        return int(minute_match.group(1))
+        
+    return 0
 
 def save_to_db(data):
     """Speichert Daten exakt im 5-Minuten-Takt (xx:00, xx:05, xx:10...)."""
