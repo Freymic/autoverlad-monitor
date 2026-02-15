@@ -78,23 +78,30 @@ if st.button("Route jetzt berechnen"):
             st.success(f"🏁 **Ziel Ried-Mörel:** {ankunft_ziel_f.strftime('%H:%M')}{tag_text_f}")
 
     with col_l:
-        st.subheader("🚆 Via Lötschberg (Kandersteg)")
-        if naechster_zug_l:
-            ist_morgen_l = naechster_zug_l.date() > ankunft_kandersteg.date()
-            tag_text_l = " (Morgen)" if ist_morgen_l else ""
-            
+    st.subheader("🚆 Via Lötschberg (Kandersteg)")
+    if naechster_zug_l:
+        # Check: Ist die Abfahrt erst morgen?
+        ist_morgen_l = naechster_zug_l.date() > jetzt.date()
+        
+        if ist_morgen_l:
+            # Eine auffällige Warnung ganz oben in der Spalte
+            st.error(f"⚠️ **Abfahrt erst morgen, {naechster_zug_l.strftime('%d.%m.')}**")
+            st.metric("Ankunft Ried-Mörel", naechster_zug_l.strftime('%H:%M'), "Morgen", delta_color="inverse")
+        else:
             st.metric("Ankunft Ried-Mörel", ankunft_ziel_l.strftime('%H:%M'), f"{total_l} Min")
-            if ist_morgen_l:
-                st.info("🌙 Erster Zug morgen früh berechnet.")
-            
-            st.write(f"🏠 **Start:** {start}")
-            st.write(f"⬇️ Fahrt bis Kandersteg: **{anfahrt_l} Min**")
-            st.write(f"🏎️ **Ankunft Terminal:** {ankunft_kandersteg.strftime('%H:%M')}")
+
+        st.write(f"🏠 **Start:** {start}")
+        st.write(f"🏎️ **Ankunft Terminal:** {ankunft_kandersteg.strftime('%H:%M')}")
+        
+        if ist_morgen_l:
+            # Berechne die Wartezeit in Stunden für bessere Lesbarkeit
+            stunden_warten = effektive_warte_l // 60
+            st.warning(f"⏳ **Nachtpause:** Du musst **{stunden_warten}h** warten, bis der Verlad wieder öffnet.")
+        else:
             st.warning(f"⏳ **Wartezeit:** {effektive_warte_l} Min")
-            st.write(f"🚂 **Abfahrt Kandersteg:** {naechster_zug_l.strftime('%H:%M')}{tag_text_l}")
-            st.write(f"🚂 **Zugfahrt:** {zug_l_dauer} Min")
-            st.write(f"⬇️ Restliche Fahrt: **{ziel_l} Min**")
-            st.success(f"🏁 **Ziel Ried-Mörel:** {ankunft_ziel_l.strftime('%H:%M')}{tag_text_l}")
+
+        st.write(f"🚂 **Abfahrt Kandersteg:** **{naechster_zug_l.strftime('%H:%M')} Uhr**")
+        st.success(f"🏁 **Ziel:** {ankunft_ziel_l.strftime('%H:%M')} Uhr")
 
     st.divider()
     # Empfehlungs-Logik
