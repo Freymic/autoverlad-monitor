@@ -75,7 +75,7 @@ if st.button("Route jetzt berechnen"):
             st.write(f"🚂 **Abfahrt Realp:** {naechster_zug_f.strftime('%H:%M')}{tag_text_f}")
             st.write(f"🚂 **Zugfahrt:** {zug_f_dauer} Min")
             st.write(f"⬇️ Restliche Fahrt: **{ziel_f} Min**")
-            st.success(f"🏁 **Ziel:** {ankunft_ziel_f.strftime('%H:%M')}{tag_text_f}")
+            st.success(f"🏁 **Ziel Ried-Mörel:** {ankunft_ziel_f.strftime('%H:%M')}{tag_text_f}")
 
     with col_l:
         st.subheader("🚆 Via Lötschberg (Kandersteg)")
@@ -94,7 +94,7 @@ if st.button("Route jetzt berechnen"):
             st.write(f"🚂 **Abfahrt Kandersteg:** {naechster_zug_l.strftime('%H:%M')}{tag_text_l}")
             st.write(f"🚂 **Zugfahrt:** {zug_l_dauer} Min")
             st.write(f"⬇️ Restliche Fahrt: **{ziel_l} Min**")
-            st.success(f"🏁 **Ziel:** {ankunft_ziel_l.strftime('%H:%M')}{tag_text_l}")
+            st.success(f"🏁 **Ziel Ried-Mörel:** {ankunft_ziel_l.strftime('%H:%M')}{tag_text_l}")
 
     st.divider()
     # Empfehlungs-Logik
