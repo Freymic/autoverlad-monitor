@@ -27,44 +27,40 @@ cols = st.columns(4)
 for i, (name, d) in enumerate(data.items()):
     cols[i % 4].metric(label=name, value=f"{d['min']} Min")
 
-# --- 2. DATEN LADEN ---
+# --- 2. DATEN LADEN (Optimiert) ---
 with sqlite3.connect(DB_NAME) as conn:
-    cutoff_24h = (datetime.now(CH_TZ) - pd.Timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S')
-    # Wir holen die Spalten explizit einzeln ab
-    df_chart = pd.read_sql_query(
-        f"SELECT timestamp, station, minutes FROM stats WHERE timestamp >= '{cutoff_24h}' ORDER BY timestamp ASC", 
-        conn
-    )
-    df_history = pd.read_sql_query("SELECT timestamp, station, minutes, raw_text FROM stats ORDER BY timestamp DESC LIMIT 100", conn)
+    # Wir laden NUR die letzten 24h und NUR realistische Werte (< 500 Min)
+    # Das verhindert, dass 40-Millionen-Leichen das Diagramm bremsen
+    query = """
+    SELECT timestamp, station, minutes 
+    FROM stats 
+    WHERE timestamp >= datetime('now', '-24 hours') 
+    AND minutes < 500
+    ORDER BY timestamp ASC
+    """
+    df_chart = pd.read_sql_query(query, conn)
+    
+    # Historie begrenzen auf die letzten 50 Einträge (reicht für Debug)
+    df_history = pd.read_sql_query("SELECT * FROM stats ORDER BY timestamp DESC LIMIT 50", conn)
 
-# --- 3. TREND CHART ---
+# --- 3. TREND CHART (Performant) ---
 st.subheader("📈 24h Trend")
 
 if not df_chart.empty:
     df_plot = df_chart.copy()
-    
-    # 1. SICHERHEIT: Timestamp in echtes Datum umwandeln
     df_plot['timestamp'] = pd.to_datetime(df_plot['timestamp']).dt.tz_localize(None)
     
-    # 2. SICHERHEIT: Minuten strikt in Zahlen umwandeln und ALLES über 480 (8h) kappen
-    # Das verhindert, dass Zeitstempel-Zahlen das Diagramm sprengen
-    df_plot['minutes'] = pd.to_numeric(df_plot['minutes'], errors='coerce').fillna(0)
-    df_plot = df_plot[df_plot['minutes'] < 500] # Sicherheits-Filter gegen Millionen-Werte
-    
-    # Dynamischer Deckel (Puffer)
-    current_max = int(df_plot['minutes'].max()) if not df_plot.empty else 0
-    upper_limit = max(60, ((current_max // 30) + 1) * 30 + 30)
+    # Dynamisches Limit ohne komplexe Listenberechnung
+    current_max = int(df_plot['minutes'].max())
+    upper_limit = max(60, int(current_max * 1.2))
 
     chart = alt.Chart(df_plot).mark_line(
         interpolate='monotone', size=3, point=True 
     ).encode(
         x=alt.X('timestamp:T', title="Uhrzeit"),
-        y=alt.Y('minutes:Q', 
-                title="Wartezeit (Minuten)",
-                scale=alt.Scale(domain=[0, upper_limit])),
-        color=alt.Color('station:N', title="Station"),
-        tooltip=['timestamp:T', 'station:N', 'minutes:Q']
-    ).properties(height=400).interactive()
+        y=alt.Y('minutes:Q', title="Minuten", scale=alt.Scale(domain=[0, upper_limit])),
+        color='station:N'
+    ).properties(height=400)
     
     st.altair_chart(chart, use_container_width=True)
 
