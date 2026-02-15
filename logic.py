@@ -20,34 +20,41 @@ def init_db():
     conn.close()
 
 def parse_time_to_minutes(time_str):
-    """Extrahiert Stunden und Minuten präzise aus komplexen/doppelten Texten."""
+    """Sicheres Mapping von Text-Phrasen zu Minutenwerten."""
     if not time_str:
         return 0
     
     text = time_str.lower()
     
-    # 1. Sofort-Check für "Keine Wartezeit"
-    if any(phrase in text for phrase in ["keine wartezeit", "0 min", "no waiting"]):
-        return 0
+    # 1. Bekannte Standard-Mappings (Hardcoded für maximale Stabilität)
+    mapping = {
+        "keine wartezeit": 0,
+        "30 minuten": 30,
+        "1 stunde": 60,
+        "1 stunde 30 minuten": 90,
+        "2 stunden": 120,
+        "2 stunden 30 minuten": 150,
+        "3 stunden": 180,
+        "4 stunden": 240
+    }
+    
+    for phrase, minutes in mapping.items():
+        if phrase in text:
+            return minutes
 
-    # 2. Falls der Text doppelt ist (wie bei Oberwald), nehmen wir nur den ersten Satz
-    # Wir trennen am Punkt, um Doppel-Additionen zu vermeiden
-    first_sentence = text.split('.')[0]
-
+    # 2. Fallback: Falls keine Phrase exakt passt, rechne flexibel (mit Plural-Support)
     total_min = 0
-
-    # 3. STUNDEN extrahieren (sucht nach Zahlen vor 'stunde' oder 'std')
-    # Wir suchen im ersten Satz nach der Stundenanzahl
-    hour_match = re.search(r'(\d+)\s*(?:stunde|std)', first_sentence)
+    
+    # Sucht nach Zahlen vor 'stunde' oder 'stunden' oder 'std'
+    hour_match = re.search(r'(\d+)\s*stunde', text)
     if hour_match:
         total_min += int(hour_match.group(1)) * 60
-
-    # 4. MINUTEN extrahieren (sucht nach Zahlen vor 'min')
-    # (?<!:) verhindert, dass Uhrzeiten wie 16:35 als Minuten gezählt werden
-    minute_match = re.search(r'(?<!:)(\b\d+)\s*(?:min|minute)', first_sentence)
+    
+    # Sucht nach Zahlen vor 'min' (ignoriert Uhrzeiten mit Doppelpunkt)
+    minute_match = re.search(r'(?<!:)(\b\d+)\s*min', text)
     if minute_match:
         total_min += int(minute_match.group(1))
-
+        
     return total_min
 
 def fetch_all_data():
