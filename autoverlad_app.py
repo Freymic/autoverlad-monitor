@@ -85,3 +85,34 @@ except Exception:
     st.info("ℹ️ Cloud-Backup: Standard-Modus aktiv.")
 
 st.caption(f"Letztes Update: {datetime.now(CH_TZ).strftime('%H:%M:%S')} | Intervall: 5 Min")
+
+# --- DIAGNOSE: VERFÜGBARE TABS ANZEIGEN ---
+if st.checkbox("🔍 Verfügbare Google Sheet Tabs prüfen"):
+    try:
+        conn_gs = st.connection("gsheets", type=GSheetsConnection)
+        # Wir nutzen eine interne Methode, um die Tab-Namen zu holen
+        spreadsheet_url = st.secrets["connections"]["gsheets"]["spreadsheet"]
+        
+        # Kleiner Trick: Wir laden das Sheet ohne Worksheet-Angabe, 
+        # um zu sehen, was verfügbar ist (nur für Diagnose)
+        st.write("Suche nach verfügbaren Tabs...")
+        
+        # Zeige an, was in den Secrets steht zum Abgleich
+        target_ws = st.secrets["connections"]["gsheets"].get("worksheet", "NICHT DEFINIERT")
+        st.info(f"In Secrets gesuchter Tab: `{target_ws}`")
+        
+        # Dieser Befehl hilft uns, die Struktur zu sehen
+        client = conn_gs._instance  # Zugriff auf den GSheets-Client
+        sheet = client.open_by_url(spreadsheet_url)
+        worksheets = sheet.worksheets()
+        
+        tab_names = [ws.title for ws in worksheets]
+        st.write("Gefundene Tabs im Dokument:")
+        for name in tab_names:
+            if name == target_ws:
+                st.success(f"✅ {name} (Treffer!)")
+            else:
+                st.code(name)
+                
+    except Exception as e:
+        st.error(f"Diagnose fehlgeschlagen: {e}")
