@@ -1,10 +1,8 @@
 streamlit
-requests
-beautifulsoup4
-streamlit-autorefresh
 pandas
+sqlite3
 altair
-lxml
-selenium
-webdriver-manager
 pytz
+st-gsheets-connection
+requests
+streamlit-autorefresh
