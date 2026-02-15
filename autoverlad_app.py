@@ -5,29 +5,60 @@ import altair as alt
 from datetime import datetime
 from logic import fetch_all_data, init_db, save_to_db, DB_NAME, CH_TZ
 
-st.set_page_config(page_title="Autoverlad Live", layout="wide")
+# 1. Seiteneinstellungen
+st.set_page_config(page_title="Autoverlad Monitor", layout="wide")
 
-# Daten holen
+# 2. Daten initialisieren & abrufen
 init_db()
 data = fetch_all_data()
 save_to_db(data) 
 
-st.title("🏔️ Autoverlad Monitor (Stabiler Modus)")
+st.title("🏔️ Autoverlad Monitor")
 
-# Metriken
+# --- 1. METRIKEN ---
 cols = st.columns(4)
 for i, (name, d) in enumerate(data.items()):
     cols[i % 4].metric(label=name, value=f"{d['min']} Min")
 
-# Chart
+# --- 2. DATEN LADEN ---
 with sqlite3.connect(DB_NAME) as conn:
+    # Nur Daten der letzten 24h laden
     df = pd.read_sql_query("SELECT * FROM stats WHERE timestamp >= datetime('now', '-24 hours')", conn)
+    # Volle Historie für den Debug-Tab
+    df_history = pd.read_sql_query("SELECT * FROM stats ORDER BY timestamp DESC LIMIT 100", conn)
+
+# --- 3. TREND CHART ---
+st.subheader("📈 24h Trend")
 
 if not df.empty:
-    df['timestamp'] = pd.to_datetime(df['timestamp'])
-    chart = alt.Chart(df).mark_line(point=True).encode(
+    df_plot = df.copy()
+    df_plot['timestamp'] = pd.to_datetime(df_plot['timestamp'])
+    
+    # Sicherheits-Filter gegen Millionen-Werte/Zeitstempel-Fehler
+    df_plot = df_plot[df_plot['minutes'] < 500]
+    
+    chart = alt.Chart(df_plot).mark_line(point=True).encode(
         x=alt.X('timestamp:T', title="Zeit"),
-        y=alt.Y('minutes:Q', title="Minuten", scale=alt.Scale(domain=[0, 180])), # Fest auf 180 Min eingestellt
-        color='station:N'
-    ).properties(height=400)
+        y=alt.Y('minutes:Q', title="Wartezeit (Min)", scale=alt.Scale(domain=[0, 180])),
+        color='station:N',
+        tooltip=['timestamp:T', 'station:N', 'minutes:Q']
+    ).properties(height=400).interactive()
+    
     st.altair_chart(chart, use_container_width=True)
+else:
+    st.info("Noch keine Daten vorhanden.")
+
+# --- 4. DEBUG BEREICH ---
+st.markdown("---")
+with st.expander("🛠️ Debug Informationen"):
+    tab1, tab2 = st.tabs(["JSON Rohdaten", "Datenbank Historie"])
+    
+    with tab1:
+        st.write("Letzte API-Antwort:")
+        st.json(data)
+        
+    with tab2:
+        st.write(f"Die letzten {len(df_history)} Einträge aus der Datenbank:")
+        st.dataframe(df_history, use_container_width=True)
+
+st.caption(f"Letztes Update: {datetime.now(CH_TZ).strftime('%H:%M:%S')} | Intervall: 5 Min")
