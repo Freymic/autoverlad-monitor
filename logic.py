@@ -26,18 +26,19 @@ def parse_time_to_minutes(time_str):
     
     text = time_str.lower()
     
-    # 1. Sofort-Check für "Keine Wartezeit"
-    if "keine wartezeit" in text or "0 min" in text:
+    # 1. Sofortiger Ausschluss bei "Keine Wartezeit"
+    if "keine wartezeit" in text or "0 min" in text or "no waiting" in text:
         return 0
 
     total_minutes = 0
 
-    # 2. Stunden finden und umrechnen (z.B. "1 Stunde" -> 60)
+    # 2. Stunden finden (z.B. "1 Stunde") und in Minuten umrechnen
     hour_matches = re.findall(r'(\d+)\s*(?:std|stunde)', text)
     for h in hour_matches:
         total_minutes += int(h) * 60
 
-    # 3. Minuten finden (ignoriert Uhrzeiten durch Check auf Doppelpunkt)
+    # 3. Minuten finden (z.B. "30 Minuten")
+    # Der Lookbehind (?<!:) ignoriert Zahlen, die Teil einer Uhrzeit (16:35) sind
     min_matches = re.findall(r'(?<!:)(\b\d+)\s*(?:min|minute)', text)
     for m in min_matches:
         total_minutes += int(m)
