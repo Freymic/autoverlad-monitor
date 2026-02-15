@@ -2,25 +2,18 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 import altair as alt
-import os
-import sys
 from datetime import datetime
-from streamlit_autorefresh import st_autorefresh
-
-# Pfad-Fix für lokale Module
-sys.path.append(os.path.dirname(__file__))
 from logic import fetch_all_data, init_db, save_to_db, DB_NAME, CH_TZ
 
-# 1. Seiteneinstellungen & Auto-Refresh (alle 5 Min)
-st.set_page_config(page_title="Autoverlad Live-Monitor", layout="wide")
-st_autorefresh(interval=5 * 60 * 1000, key="global_refresh")
+# 1. Seiteneinstellungen
+st.set_page_config(page_title="Autoverlad Monitor", layout="wide")
 
-# 2. Daten-Initialisierung & Speicherung
+# 2. Daten initialisieren & abrufen
 init_db()
 data = fetch_all_data()
 save_to_db(data) 
 
-st.title("🏔️ Autoverlad Live-Monitor")
+st.title("🏔️ Autoverlad Monitor")
 
 # --- 1. METRIKEN ---
 cols = st.columns(4)
@@ -29,30 +22,33 @@ for i, (name, d) in enumerate(data.items()):
 
 # --- 2. DATEN LADEN ---
 with sqlite3.connect(DB_NAME) as conn:
-    cutoff_24h = (datetime.now(CH_TZ) - pd.Timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S')
-    df_chart = pd.read_sql_query(f"SELECT * FROM stats WHERE timestamp >= '{cutoff_24h}' ORDER BY timestamp ASC", conn)
-    df_history = pd.read_sql_query("SELECT * FROM stats ORDER BY timestamp DESC", conn)
+    # Nur Daten der letzten 24h laden
+    df = pd.read_sql_query("SELECT * FROM stats WHERE timestamp >= datetime('now', '-24 hours')", conn)
+    # Volle Historie für den Debug-Tab
+    df_history = pd.read_sql_query("SELECT * FROM stats ORDER BY timestamp DESC LIMIT 100", conn)
 
 # --- 3. TREND CHART ---
 st.subheader("📈 24h Trend")
 
-if not df_chart.empty:
-    # Daten-Vorbereitung für Altair
-    df_plot = df_chart.copy()
-    df_plot['timestamp'] = pd.to_datetime(df_plot['timestamp']).dt.tz_localize(None)
-    df_plot['minutes'] = pd.to_numeric(df_plot['minutes'], errors='coerce').fillna(0).astype(int)
+if not df.empty:
+    df_plot = df.copy()
+    df_plot['timestamp'] = pd.to_datetime(df_plot['timestamp'])
     
+    # Sicherheits-Filter gegen Millionen-Werte/Zeitstempel-Fehler
+    df_plot = df_plot[df_plot['minutes'] < 500]
+    
+    # ACHTUNG: Die Zeile darunter muss exakt unter dem 'd' von 'df_plot' stehen
     chart = alt.Chart(df_plot).mark_line(
         interpolate='monotone', 
         size=3, 
-        point=True  # Wichtig: Zeigt Punkte auch wenn die Linie flach bei 0 liegt
+        point=True
     ).encode(
         x=alt.X('timestamp:T', 
                 title="Uhrzeit (CET)",
                 axis=alt.Axis(format='%H:%M', tickCount='hour', labelAngle=-45)),
         y=alt.Y('minutes:Q', 
                 title="Wartezeit (Minuten)",
-                scale=alt.Scale(domainMin=0, domainMax=60)), # Skala bis 60, damit 0-Linie sichtbar ist
+                scale=alt.Scale(domain=[0, 180])), # domainMax=180 für stabilere Sicht
         color=alt.Color('station:N', title="Station"),
         tooltip=[
             alt.Tooltip('timestamp:T', format='%H:%M', title='Zeit'),
@@ -63,8 +59,8 @@ if not df_chart.empty:
     
     st.altair_chart(chart, use_container_width=True)
 else:
-    st.info("Noch keine Daten für die letzten 24h vorhanden. Die ersten Punkte erscheinen im nächsten 5-Minuten-Raster.")
-
+    st.info("Noch keine Daten vorhanden.")
+    
 # --- 4. DEBUG BEREICH ---
 st.markdown("---")
 with st.expander("🛠️ Debug Informationen"):
@@ -75,8 +71,7 @@ with st.expander("🛠️ Debug Informationen"):
         st.json(data)
         
     with tab2:
-        # Sicherstellen, dass df_history existiert (behebt NameError)
-        st.write(f"Einträge in der Datenbank: {len(df_history)}")
+        st.write(f"Die letzten {len(df_history)} Einträge aus der Datenbank:")
         st.dataframe(df_history, use_container_width=True)
 
 st.caption(f"Letztes Update: {datetime.now(CH_TZ).strftime('%H:%M:%S')} | Intervall: 5 Min")
