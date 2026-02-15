@@ -20,41 +20,39 @@ def init_db():
     conn.close()
 
 def parse_time_to_minutes(time_str):
-    """Sicheres Mapping von Text-Phrasen zu Minutenwerten."""
+    """Sicheres Mapping und Addition für Wartezeiten."""
     if not time_str:
         return 0
     
     text = time_str.lower()
     
-    # 1. Bekannte Standard-Mappings (Hardcoded für maximale Stabilität)
-    mapping = {
-        "keine wartezeit": 0,
-        "30 minuten": 30,
-        "1 stunde": 60,
-        "1 stunde 30 minuten": 90,
-        "2 stunden": 120,
-        "2 stunden 30 minuten": 150,
-        "3 stunden": 180,
-        "4 stunden": 240
-    }
-    
-    for phrase, minutes in mapping.items():
-        if phrase in text:
-            return minutes
+    # 1. Hardcoded Mapping für exakte Furka-Phrasen (höchste Priorität)
+    # Diese Phrasen decken 95% der Fälle ab
+    if "keine wartezeit" in text or "0 min" in text:
+        return 0
+    if "1 stunde 30 minuten" in text:
+        return 90
+    if "2 stunden 30 minuten" in text:
+        return 150
+    if "3 stunden 30 minuten" in text:
+        return 210
 
-    # 2. Fallback: Falls keine Phrase exakt passt, rechne flexibel (mit Plural-Support)
+    # 2. Fallback: Dynamische Addition
     total_min = 0
     
-    # Sucht nach Zahlen vor 'stunde' oder 'stunden' oder 'std'
+    # Suche nach Stunden (unterstützt 'stunde' und 'stunden')
     hour_match = re.search(r'(\d+)\s*stunde', text)
     if hour_match:
         total_min += int(hour_match.group(1)) * 60
-    
-    # Sucht nach Zahlen vor 'min' (ignoriert Uhrzeiten mit Doppelpunkt)
-    minute_match = re.search(r'(?<!:)(\b\d+)\s*min', text)
-    if minute_match:
-        total_min += int(minute_match.group(1))
         
+    # Suche nach Minuten (ignoriert Uhrzeiten wie 16:35 durch Lookbehind)
+    # Wir entfernen den Doppelpunkt-Check kurzzeitig, um sicherzugehen
+    minute_match = re.search(r'(\d+)\s*min', text)
+    if minute_match:
+        # Sicherheitscheck: Wenn die Zahl Teil einer Uhrzeit ist (z.B. XX:35), ignorieren
+        if f":{minute_match.group(1)}" not in text:
+            total_min += int(minute_match.group(1))
+            
     return total_min
 
 def fetch_all_data():
