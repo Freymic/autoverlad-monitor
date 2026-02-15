@@ -42,17 +42,23 @@ if not df_chart.empty:
     df_plot['timestamp'] = pd.to_datetime(df_plot['timestamp']).dt.tz_localize(None)
     df_plot['minutes'] = pd.to_numeric(df_plot['minutes'], errors='coerce').fillna(0).astype(int)
     
+    # DYNAMISCHE SKALIERUNG BERECHNEN
+    max_value = df_plot['minutes'].max()
+    # Wir nehmen das Maximum + 20%, aber mindestens 60, damit es gut aussieht
+    dynamic_max = max(60, int(max_value * 1.2))
+    
     chart = alt.Chart(df_plot).mark_line(
         interpolate='monotone', 
         size=3, 
-        point=True  # Wichtig: Zeigt Punkte auch wenn die Linie flach bei 0 liegt
+        point=True
     ).encode(
         x=alt.X('timestamp:T', 
                 title="Uhrzeit (CET)",
                 axis=alt.Axis(format='%H:%M', tickCount='hour', labelAngle=-45)),
         y=alt.Y('minutes:Q', 
                 title="Wartezeit (Minuten)",
-                scale=alt.Scale(domainMin=0, domainMax=60)), # Skala bis 60, damit 0-Linie sichtbar ist
+                # Hier ist die Änderung: dynamic_max statt fester 60
+                scale=alt.Scale(domainMin=0, domainMax=dynamic_max)), 
         color=alt.Color('station:N', title="Station"),
         tooltip=[
             alt.Tooltip('timestamp:T', format='%H:%M', title='Zeit'),
@@ -62,8 +68,6 @@ if not df_chart.empty:
     ).properties(height=400).interactive()
     
     st.altair_chart(chart, use_container_width=True)
-else:
-    st.info("Noch keine Daten für die letzten 24h vorhanden. Die ersten Punkte erscheinen im nächsten 5-Minuten-Raster.")
 
 # --- 4. DEBUG BEREICH ---
 st.markdown("---")
