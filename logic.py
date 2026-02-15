@@ -4,7 +4,7 @@ import re
 import sqlite3
 import json
 import pandas as pd
-from datetime import datetime, timedelta
+import datetime
 import pytz
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
@@ -37,7 +37,7 @@ def restore_from_gsheets(sqlite_conn):
         
         if not df.empty:
             df['timestamp'] = pd.to_datetime(df['timestamp'])
-            cutoff = datetime.now() - timedelta(hours=24)
+            cutoff = datetime.datetime.now() - datetime.timedelta(hours=24)
             df_recent = df[df['timestamp'] > cutoff]
             
             if not df_recent.empty:
@@ -144,7 +144,7 @@ def save_to_db(data):
         conn = sqlite3.connect(DB_NAME)
         c = conn.cursor()
         
-        now = datetime.now(CH_TZ)
+        now = datetime.datetime.now(CH_TZ)
         minute_quantized = (now.minute // 5) * 5
         quantized_now = now.replace(minute=minute_quantized, second=0, microsecond=0)
         timestamp_str = quantized_now.strftime('%Y-%m-%d %H:%M:%S')
@@ -166,7 +166,7 @@ def save_to_google_sheets(data):
         conn_gs = st.connection("gsheets", type=GSheetsConnection)
         
         # 1. Zeitstempel vorbereiten
-        now = datetime.now(CH_TZ)
+        now = datetime.datetime.now(CH_TZ)
         minute_quantized = (now.minute // 5) * 5
         ts_str = now.replace(minute=minute_quantized, second=0, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
         
@@ -206,3 +206,142 @@ def save_to_google_sheets(data):
     except Exception as e:
         st.error(f"GSheets Sync Fehler: {e}")
         return False
+
+def get_latest_wait_times(station):
+    # Holt den aktuellsten Wert für eine Station aus der SQLite DB
+    with sqlite3.connect(DB_NAME) as conn:
+        df = pd.read_sql_query(
+            "SELECT minutes FROM stats WHERE station = ? ORDER BY timestamp DESC LIMIT 1", 
+            conn, params=(station,)
+        )
+    return int(df['minutes'].iloc[0]) if not df.empty else 0
+
+def get_google_maps_duration(origin, destination):
+    """Holt die echte Fahrzeit inkl. Verkehr von Google Maps."""
+    api_key = st.secrets["G_MAPS_API_KEY"]
+    
+    url = "https://maps.googleapis.com/maps/api/distancematrix/json"
+    params = {
+        "origins": origin,
+        "destinations": destination,
+        "mode": "driving",
+        "departure_time": "now",
+        "traffic_model": "best_guess",
+        "key": api_key
+    }
+    
+    try:
+        response = requests.get(url, params=params)
+        data = response.json()
+        
+        if data["status"] == "OK":
+            # Zeit in Sekunden umrechnen in Minuten
+            seconds = data["rows"][0]["elements"][0]["duration_in_traffic"]["value"]
+            return seconds // 60
+        else:
+            st.error(f"Google Maps Fehler: {data['status']}")
+            return 60 # Fallback
+    except Exception as e:
+        st.error(f"Verbindung zu Google fehlgeschlagen: {e}")
+        return 60 # Fallback
+
+def get_furka_departure(arrival_time):
+    """Berechnet die nächste Abfahrt ab Realp laut offiziellem Fahrplan."""
+    
+    def find_next_train(current_dt):
+        wd = current_dt.weekday() # 0=Mo, 4=Fr, 6=So
+        # 10 Min Puffer für Ticket/Verlad
+        earliest = current_dt + datetime.timedelta(minutes=10)
+        h, m = earliest.hour, earliest.minute
+
+        # 1. Betriebszeiten definieren
+        first_h, first_m = 6, 5
+        if wd >= 4: last_h, last_m = 22, 5    # Fr-So bis 22:05
+        elif wd == 0: last_h, last_m = 21, 5  # Mo bis 21:05
+        else: last_h, last_m = 21, 5         # Di-Do bis 21:05 (aber Stundentakt)
+
+        # 2. Check: Ist es vor dem ersten Zug?
+        if h < first_h or (h == first_h and m <= first_m):
+            return earliest.replace(hour=6, minute=5, second=0, microsecond=0)
+
+        # 3. Check: Ist es nach dem letzten Zug?
+        if h > last_h or (h == last_h and m > last_m):
+            return None
+
+        # 4. Takt-Berechnung
+        if wd >= 4 or wd == 0: # Mo, Fr-So: 30-Min-Takt (.05 / .35)
+            if m <= 5: dep_m = 5
+            elif m <= 35: dep_m = 35
+            else:
+                dep_m = 5
+                h += 1
+        else: # Di-Do: 60-Min-Takt (.05)
+            dep_m = 5
+            if m > 5: h += 1
+            
+        return earliest.replace(hour=h, minute=dep_m, second=0, microsecond=0)
+
+    # Versuch für heute
+    zug = find_next_train(arrival_time)
+    
+    # Wenn heute keiner mehr: Erster Zug morgen früh 06:05
+    if zug is None:
+        morgen = (arrival_time + datetime.timedelta(days=1)).replace(hour=0, minute=0)
+        zug = find_next_train(morgen)
+        
+    return zug
+
+def get_loetschberg_departure(arrival_time):
+    """Berechnet die nächste Abfahrt ab Kandersteg (Mo-So)."""
+    
+    def find_next_train_l(current_dt):
+        wd = current_dt.weekday() # 0=Mo, 4=Fr, 5=Sa, 6=So
+        # 10 Min Puffer für Ticket/Verlad
+        earliest = current_dt + datetime.timedelta(minutes=10)
+        h, m = earliest.hour, earliest.minute
+
+        # 1. Erste Abfahrt am Morgen (05:25)
+        if h < 5 or (h == 5 and m <= 25):
+            return earliest.replace(hour=5, minute=25, second=0, microsecond=0)
+
+        # 2. Spätverkehr (Mo-Do) laut deiner Liste
+        if wd <= 3: 
+            if h == 21 and m > 43:
+                return earliest.replace(hour=22, minute=48, second=0, microsecond=0)
+            if h == 22:
+                if m <= 48: return earliest.replace(hour=22, minute=48, second=0, microsecond=0)
+                else: return earliest.replace(hour=23, minute=28, second=0, microsecond=0)
+            if h == 23:
+                if m <= 28: return earliest.replace(hour=23, minute=28, second=0, microsecond=0)
+                else: return None
+
+        # 3. Takt-Logik (Fr-So: 15-Min / Mo-Do: 30-Min)
+        # Freitag (4), Samstag (5), Sonntag (6)
+        if wd >= 4:
+            # Deine Screenshots zeigen: .13, .27, .43, .58
+            if m <= 13: dep_m = 13
+            elif m <= 27: dep_m = 27
+            elif m <= 43: dep_m = 43
+            elif m <= 58: dep_m = 58
+            else:
+                dep_m = 13
+                h += 1
+        else:
+            # Montag bis Donnerstag: .13, .43
+            if m <= 13: dep_m = 13
+            elif m <= 43: dep_m = 43
+            else:
+                dep_m = 13
+                h += 1
+            
+        return earliest.replace(hour=h % 24, minute=dep_m, second=0, microsecond=0)
+
+    # Versuch für heute
+    zug = find_next_train_l(arrival_time)
+    
+    # Falls heute keiner mehr: Erster Zug morgen
+    if zug is None:
+        morgen = (arrival_time + datetime.timedelta(days=1)).replace(hour=0, minute=0)
+        zug = find_next_train_l(morgen)
+        
+    return zug
