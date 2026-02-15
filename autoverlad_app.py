@@ -8,19 +8,6 @@ from streamlit_gsheets import GSheetsConnection
 from streamlit_autorefresh import st_autorefresh
 import datetime
 
-# --- AUTOMATISCHER REFRESH ALLE 5 MINUTEN ---
-# Berechne Sekunden bis zum nächsten 5-Minuten-Takt
-now = datetime.datetime.now()
-seconds_past_interval = (now.minute % 5) * 60 + now.second
-# Wir warten bis zum Intervall + 10 Sekunden Puffer, damit die Quell-API sicher neue Daten hat
-seconds_to_wait = (300 - seconds_past_interval) + 10
-
-# Falls wir gerade erst am Intervall sind, warten wir wieder 5 Min
-if seconds_to_wait < 30: 
-    seconds_to_wait += 300
-
-st_autorefresh(interval=seconds_to_wait * 1000, key="dynamic_refresh")
-
 # 1. Seiteneinstellungen
 st.set_page_config(page_title="Autoverlad Monitor", layout="wide")
 
@@ -92,12 +79,27 @@ with st.expander("🛠️ Debug Informationen"):
         st.write("Letzte Einträge aus SQLite:")
         st.dataframe(df_history, use_container_width=True)
 
+
 # --- 5. STATUS & CLOUD-INFO ---
 try:
-    # Wir greifen auf die Verschachtelung in den Secrets zu
     current_ws = st.secrets["connections"]["gsheets"]["worksheet"]
-    st.success(f"✅ Cloud-Backup aktiv: Daten werden in Tab **'{current_ws}'** gespeichert.")
+    st.success(f"✅ Cloud-Backup aktiv: Tab **'{current_ws}'**.")
 except Exception:
     st.info("ℹ️ Cloud-Backup: Standard-Modus aktiv.")
 
-st.caption(f"Letztes Update: {datetime.now(CH_TZ).strftime('%H:%M:%S')} | Intervall: 5 Min")
+# --- 6. DYNAMISCHER AUTOREFRESH (xx:00, xx:05, ...) ---
+now = datetime.now(CH_TZ)
+# Berechne Sekunden bis zum nächsten 5-Minuten-Takt
+# Beispiel: Es ist 20:03 -> seconds_past = 3*60 = 180s. 
+# wait = (300 - 180) + 10s Puffer = 130s.
+seconds_past_interval = (now.minute % 5) * 60 + now.second
+seconds_to_wait = (300 - seconds_past_interval) + 10 # +10s Puffer für API-Aktualisierung
+
+# Falls wir aus Versehen < 0 landen
+if seconds_to_wait < 10:
+    seconds_to_wait += 300
+
+# Trigger Refresh in Millisekunden
+st_autorefresh(interval=seconds_to_wait * 1000, key="auto_sync_trigger")
+
+st.caption(f"Letztes Update: {now.strftime('%H:%M:%S')} | Nächstes Update in ~{int(seconds_to_wait)}s")
