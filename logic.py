@@ -20,28 +20,33 @@ def init_db():
     conn.close()
 
 def parse_time_to_minutes(time_str):
-    """Extrahiert Minuten gezielt aus Sätzen über Wartezeiten."""
+    """Extrahiert Minuten und Stunden korrekt aus dem Text."""
     if not time_str:
         return 0
-        
-    time_str_lower = time_str.lower()
     
-    # 1. Prüfen auf "keine Wartezeit"
-    if any(phrase in time_str_lower for phrase in ["keine wartezeit", "0 min", "no waiting"]):
+    text = time_str.lower()
+    
+    # 1. Ausschluss von reinen Fahrplan-Infos ohne Wartezeit-Kontext
+    if "wartezeit" not in text and "keine wartezeit" not in text:
         return 0
-        
-    # 2. Suche nach Mustern wie "zirka 1 Stunde" oder "ca. 1 Stunde"
-    hour_match = re.search(r'(?:zirka|ca\.|etwa|über)\s*(\d+)\s*stunde', time_str_lower)
-    if hour_match:
-        return int(hour_match.group(1)) * 60
 
-    # 3. Suche nach "X Minuten" oder "X Min" direkt im Kontext von Wartezeit
-    # Dieser Regex sucht eine Zahl, die vor "min" steht
-    minute_match = re.search(r'(\d+)\s*min', time_str_lower)
-    if minute_match:
-        return int(minute_match.group(1))
-        
-    return 0
+    if "keine wartezeit" in text or "0 min" in text:
+        return 0
+
+    total_minutes = 0
+
+    # 2. Stunden finden (z.B. "1 Stunde")
+    hour_match = re.search(r'(\d+)\s*stunde', text)
+    if hour_match:
+        total_minutes += int(hour_match.group(1)) * 60
+
+    # 3. Minuten finden (z.B. "30 Minuten" oder "30 Min")
+    # Wir suchen nur nach Minuten, wenn sie nicht Teil einer Uhrzeit (XX:35) sind
+    min_match = re.search(r'(\d+)\s*min', text)
+    if min_match:
+        total_minutes += int(min_match.group(1))
+
+    return total_minutes
 
 def save_to_db(data):
     """Speichert Daten exakt im 5-Minuten-Takt (xx:00, xx:05, xx:10...)."""
