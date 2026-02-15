@@ -5,7 +5,6 @@ import sqlite3
 import json
 import pandas as pd
 import datetime
-from datetime import timedelta
 import pytz
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
@@ -38,7 +37,7 @@ def restore_from_gsheets(sqlite_conn):
         
         if not df.empty:
             df['timestamp'] = pd.to_datetime(df['timestamp'])
-            cutoff = datetime.now() - timedelta(hours=24)
+            cutoff = datetime.datetime.now() - datetime.timedelta(hours=24)
             df_recent = df[df['timestamp'] > cutoff]
             
             if not df_recent.empty:
@@ -145,7 +144,7 @@ def save_to_db(data):
         conn = sqlite3.connect(DB_NAME)
         c = conn.cursor()
         
-        now = datetime.now(CH_TZ)
+        now = datetime.datetime.now(CH_TZ)
         minute_quantized = (now.minute // 5) * 5
         quantized_now = now.replace(minute=minute_quantized, second=0, microsecond=0)
         timestamp_str = quantized_now.strftime('%Y-%m-%d %H:%M:%S')
@@ -167,7 +166,7 @@ def save_to_google_sheets(data):
         conn_gs = st.connection("gsheets", type=GSheetsConnection)
         
         # 1. Zeitstempel vorbereiten
-        now = datetime.now(CH_TZ)
+        now = datetime.datetime.now(CH_TZ)
         minute_quantized = (now.minute // 5) * 5
         ts_str = now.replace(minute=minute_quantized, second=0, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
         
@@ -245,8 +244,6 @@ def get_google_maps_duration(origin, destination):
     except Exception as e:
         st.error(f"Verbindung zu Google fehlgeschlagen: {e}")
         return 60 # Fallback
-
-import datetime
 
 def get_furka_departure(arrival_time):
     """Berechnet die nächste Abfahrt ab Realp basierend auf dem PDF-Fahrplan."""
