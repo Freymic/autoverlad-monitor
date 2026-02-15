@@ -12,14 +12,14 @@ if st.button("Route jetzt berechnen"):
         # Daten für Furka
         anfahrt_f = get_google_maps_duration(start, "Autoverlad Realp")
         warte_f = get_latest_wait_times("Realp")
-        zug_f = 20
+        zug_f = 25
         ziel_f = get_google_maps_duration("Oberwald", "Ried-Mörel")
         total_f = anfahrt_f + warte_f + zug_f + ziel_f
 
         # Daten für Lötschberg
         anfahrt_l = get_google_maps_duration(start, "Autoverlad Kandersteg")
         warte_l = get_latest_wait_times("Kandersteg")
-        zug_l = 15
+        zug_l = 20
         ziel_l = get_google_maps_duration("Goppenstein", "Ried-Mörel")
         total_l = anfahrt_l + warte_l + zug_l + ziel_l
 
