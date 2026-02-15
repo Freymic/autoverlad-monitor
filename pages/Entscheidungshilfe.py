@@ -1,6 +1,6 @@
 import streamlit as st
 import datetime
-# Wichtig: get_loetschberg_departure muss in der logic.py vorhanden sein!
+# Importiere die Logik-Funktionen aus deiner logic.py
 from logic import (
     get_latest_wait_times, 
     get_google_maps_duration, 
@@ -14,7 +14,7 @@ st.title("🚗 Deine Reise nach Ried-Mörel")
 start = st.text_input("Startpunkt:", value="Buchrain")
 
 if st.button("Route jetzt berechnen"):
-    with st.spinner("Berechne Fahrplan und Verkehrsdaten..."):
+    with st.spinner("Frage Verkehrsdaten und Fahrpläne ab..."):
         jetzt = datetime.datetime.now()
         
         # --- ROUTE A: FURKA (REALP) ---
@@ -39,13 +39,11 @@ if st.button("Route jetzt berechnen"):
         anfahrt_l = get_google_maps_duration(start, "Autoverlad Kandersteg")
         ankunft_kandersteg = jetzt + datetime.timedelta(minutes=anfahrt_l)
         
-        # NEU: Nutzt jetzt deine präzise Logik aus logic.py
         naechster_zug_l = get_loetschberg_departure(ankunft_kandersteg)
         
         if naechster_zug_l:
             wartezeit_fahrplan_l = int((naechster_zug_l - ankunft_kandersteg).total_seconds() / 60)
             stau_l = get_latest_wait_times("Kandersteg")
-            # Die echte Wartezeit vor Ort
             effektive_warte_l = max(wartezeit_fahrplan_l, stau_l)
             
             zug_l_dauer = 20
@@ -55,57 +53,60 @@ if st.button("Route jetzt berechnen"):
         else:
             total_l = 9999
 
-    # --- ANZEIGE IN ZWEI SPALTEN ---
+    # --- ANZEIGE DER ERGEBNISSE ---
     col_f, col_l = st.columns(2)
 
+    # SPALTE FURKA
     with col_f:
         st.subheader("🏔️ Via Furka (Realp)")
         if naechster_zug_f:
-            ist_morgen_f = naechster_zug_f.date() > ankunft_realp.date()
-            tag_text_f = " (Morgen)" if ist_morgen_f else ""
+            ist_morgen_f = naechster_zug_f.date() > jetzt.date()
             
-            st.metric("Ankunft Ried-Mörel", ankunft_ziel_f.strftime('%H:%M'), f"{total_f} Min")
             if ist_morgen_f:
-                st.info("🌙 Erster Zug morgen früh berechnet.")
-            
-            st.write(f"🏠 **Start:** {start}")
-            st.write(f"⬇️ Fahrt bis Realp: **{anfahrt_f} Min**")
-            st.write(f"🏎️ **Ankunft Terminal:** {ankunft_realp.strftime('%H:%M')}")
-            st.warning(f"⏳ **Wartezeit:** {effektive_warte_f} Min")
-            st.write(f"🚂 **Abfahrt Realp:** {naechster_zug_f.strftime('%H:%M')}{tag_text_f}")
-            st.write(f"🚂 **Zugfahrt:** {zug_f_dauer} Min")
-            st.write(f"⬇️ Restliche Fahrt: **{ziel_f} Min**")
-            st.success(f"🏁 **Ziel Ried-Mörel:** {ankunft_ziel_f.strftime('%H:%M')}{tag_text_f}")
+                st.error(f"📅 **Abfahrt erst morgen, {naechster_zug_f.strftime('%d.%m.')}**")
+                st.metric("Ankunft", ankunft_ziel_f.strftime('%H:%M'), "MORGEN", delta_color="inverse")
+                # Wartezeit in Stunden anzeigen
+                st.warning(f"⏳ **Nachtpause:** {effektive_warte_f // 60}h {effektive_warte_f % 60}min warten.")
+            else:
+                st.metric("Ankunft", ankunft_ziel_f.strftime('%H:%M'), f"{total_f} Min")
+                st.warning(f"⏳ **Wartezeit:** {effektive_warte_f} Min")
 
+            st.write(f"🏎️ Ankunft Terminal: {ankunft_realp.strftime('%H:%M')}")
+            st.write(f"🚂 Nächster Zug: **{naechster_zug_f.strftime('%H:%M')} Uhr**")
+            st.write(f"🏁 Ziel Ried-Mörel: {ankunft_ziel_f.strftime('%H:%M')} Uhr")
+        else:
+            st.error("Kein Fahrplan für Furka gefunden.")
+
+    # SPALTE LÖTSCHBERG
     with col_l:
-    st.subheader("🚆 Via Lötschberg (Kandersteg)")
-    if naechster_zug_l:
-        # Check: Ist die Abfahrt erst morgen?
-        ist_morgen_l = naechster_zug_l.date() > jetzt.date()
-        
-        if ist_morgen_l:
-            # Eine auffällige Warnung ganz oben in der Spalte
-            st.error(f"⚠️ **Abfahrt erst morgen, {naechster_zug_l.strftime('%d.%m.')}**")
-            st.metric("Ankunft Ried-Mörel", naechster_zug_l.strftime('%H:%M'), "Morgen", delta_color="inverse")
+        st.subheader("🚆 Via Lötschberg (Kandersteg)")
+        if naechster_zug_l:
+            ist_morgen_l = naechster_zug_l.date() > jetzt.date()
+            
+            if ist_morgen_l:
+                st.error(f"📅 **Abfahrt erst morgen, {naechster_zug_l.strftime('%d.%m.')}**")
+                st.metric("Ankunft", ankunft_ziel_l.strftime('%H:%M'), "MORGEN", delta_color="inverse")
+                st.warning(f"⏳ **Nachtpause:** {effektive_warte_l // 60}h {effektive_warte_l % 60}min warten.")
+            else:
+                st.metric("Ankunft", ankunft_ziel_l.strftime('%H:%M'), f"{total_l} Min")
+                st.warning(f"⏳ **Wartezeit:** {effektive_warte_l} Min")
+
+            st.write(f"🏎️ Ankunft Terminal: {ankunft_kandersteg.strftime('%H:%M')}")
+            st.write(f"🚂 Nächster Zug: **{naechster_zug_l.strftime('%H:%M')} Uhr**")
+            st.write(f"🏁 Ziel Ried-Mörel: {ankunft_ziel_l.strftime('%H:%M')} Uhr")
         else:
-            st.metric("Ankunft Ried-Mörel", ankunft_ziel_l.strftime('%H:%M'), f"{total_l} Min")
+            st.error("Kein Fahrplan für Lötschberg gefunden.")
 
-        st.write(f"🏠 **Start:** {start}")
-        st.write(f"🏎️ **Ankunft Terminal:** {ankunft_kandersteg.strftime('%H:%M')}")
-        
-        if ist_morgen_l:
-            # Berechne die Wartezeit in Stunden für bessere Lesbarkeit
-            stunden_warten = effektive_warte_l // 60
-            st.warning(f"⏳ **Nachtpause:** Du musst **{stunden_warten}h** warten, bis der Verlad wieder öffnet.")
-        else:
-            st.warning(f"⏳ **Wartezeit:** {effektive_warte_l} Min")
-
-        st.write(f"🚂 **Abfahrt Kandersteg:** **{naechster_zug_l.strftime('%H:%M')} Uhr**")
-        st.success(f"🏁 **Ziel:** {ankunft_ziel_l.strftime('%H:%M')} Uhr")
-
+    # --- FAZIT ---
     st.divider()
-    # Empfehlungs-Logik
-    if total_f < total_l:
-        st.success(f"✅ **Empfehlung:** Über den **Furka** sparst du heute ca. {total_l - total_f} Minuten.")
+    
+    # Spezialfall: Beide Routen erst morgen möglich
+    if (naechster_zug_f and naechster_zug_f.date() > jetzt.date()) and \
+       (naechster_zug_l and naechster_zug_l.date() > jetzt.date()):
+        st.info("💡 **Geduld ist gefragt:** Beide Autoverlade haben aktuell Nachtpause. Es spielt keine grosse Rolle, welche Route du nimmst – du kommst bei beiden erst morgen früh an.")
+    
+    # Normale Empfehlung
+    elif total_f < total_l:
+        st.success(f"✅ **Empfehlung:** Nimm den **Furka**. Du sparst ca. {total_l - total_f} Minuten.")
     else:
-        st.success(f"✅ **Empfehlung:** Über den **Lötschberg** sparst du heute ca. {total_f - total_l} Minuten.")
+        st.success(f"✅ **Empfehlung:** Nimm den **Lötschberg**. Du sparst ca. {total_f - total_l} Minuten.")
