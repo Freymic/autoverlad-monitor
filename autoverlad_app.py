@@ -37,11 +37,23 @@ if not df.empty:
     # Sicherheits-Filter gegen Millionen-Werte/Zeitstempel-Fehler
     df_plot = df_plot[df_plot['minutes'] < 500]
     
-    chart = alt.Chart(df_plot).mark_line(point=True).encode(
-        x=alt.X('timestamp:T', title="Zeit"),
-        y=alt.Y('minutes:Q', title="Wartezeit (Min)", scale=alt.Scale(domain=[0, 180])),
-        color='station:N',
-        tooltip=['timestamp:T', 'station:N', 'minutes:Q']
+   chart = alt.Chart(df_plot).mark_line(
+        interpolate='monotone', 
+        size=3, 
+        point=True  # Wichtig: Zeigt Punkte auch wenn die Linie flach bei 0 liegt
+    ).encode(
+        x=alt.X('timestamp:T', 
+                title="Uhrzeit (CET)",
+                axis=alt.Axis(format='%H:%M', tickCount='hour', labelAngle=-45)),
+        y=alt.Y('minutes:Q', 
+                title="Wartezeit (Minuten)",
+                scale=alt.Scale(domainMin=0, domainMax=180)), # Skala bis 60, damit 0-Linie sichtbar ist
+        color=alt.Color('station:N', title="Station"),
+        tooltip=[
+            alt.Tooltip('timestamp:T', format='%H:%M', title='Zeit'),
+            alt.Tooltip('station:N', title='Station'),
+            alt.Tooltip('minutes:Q', title='Wartezeit (Min)')
+        ]
     ).properties(height=400).interactive()
     
     st.altair_chart(chart, use_container_width=True)
