@@ -407,8 +407,6 @@ def get_pass_status():
 
 
 def get_gemini_summer_report(routen_daten, pass_status):
-    import google.generativeai as genai
-    import streamlit as st
 
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
@@ -441,8 +439,6 @@ def get_gemini_summer_report(routen_daten, pass_status):
 
 
 def get_gemini_winter_report(routen_daten):
-    import google.generativeai as genai
-    import streamlit as st
 
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
