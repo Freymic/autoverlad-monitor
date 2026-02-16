@@ -28,7 +28,7 @@ st.title("🏔️ Autoverlad Monitor")
 
 # --- NEU: ZENTRALE STATUS-MELDUNG ---
 if not furka_aktiv:
-    st.error("🚨 **Hinweis:** Der Verladbetrieb am Furka (Realp/Oberwald) ist laut RSS-Feed aktuell **eingestellt**.")
+    st.error("🚨 **Hinweis:** Der Verladbetrieb am Furka (Realp/Oberwald) ist aktuell **eingestellt**.")
 
 # --- 1. METRIKEN (Erweitert um Status-Logik) ---
 cols = st.columns(4)
