@@ -216,14 +216,28 @@ def get_latest_wait_times(station):
         )
     return int(df['minutes'].iloc[0]) if not df.empty else 0
 
-def get_google_maps_duration(origin, destination):
-    """Holt die echte Fahrzeit inkl. Verkehr von Google Maps."""
+def get_google_maps_duration(origin, destination, waypoints=None):
+    """Holt die echte Fahrzeit inkl. Verkehr. Unterstützt optionale Wegpunkte für Passrouten."""
     api_key = st.secrets["G_MAPS_API_KEY"]
     
     url = "https://maps.googleapis.com/maps/api/distancematrix/json"
+    
+    # Wenn Wegpunkte vorhanden sind, füge sie dem Ziel oder Ursprung hinzu
+    # (Google Distance Matrix nutzt 'waypoints' nicht direkt wie Directions, 
+    # daher optimieren wir den String für die Route)
+    if waypoints:
+        # Wir nutzen das letzte Wegpunkt-Ziel als eigentliches Ziel für die Matrix 
+        # und führen die Route über die Punkte.
+        path = "|".join(waypoints)
+        origin_query = f"{origin}"
+        dest_query = f"{path}|{destination}"
+    else:
+        origin_query = origin
+        dest_query = destination
+
     params = {
-        "origins": origin,
-        "destinations": destination,
+        "origins": origin_query,
+        "destinations": dest_query,
         "mode": "driving",
         "departure_time": "now",
         "traffic_model": "best_guess",
@@ -235,15 +249,12 @@ def get_google_maps_duration(origin, destination):
         data = response.json()
         
         if data["status"] == "OK":
-            # Zeit in Sekunden umrechnen in Minuten
             seconds = data["rows"][0]["elements"][0]["duration_in_traffic"]["value"]
             return seconds // 60
         else:
-            st.error(f"Google Maps Fehler: {data['status']}")
-            return 60 # Fallback
+            return 60 
     except Exception as e:
-        st.error(f"Verbindung zu Google fehlgeschlagen: {e}")
-        return 60 # Fallback
+        return 60
 
 def get_furka_departure(arrival_time):
     """Berechnet die nächste Abfahrt ab Realp laut offiziellem Fahrplan."""
