@@ -216,34 +216,40 @@ def get_latest_wait_times(station):
         )
     return int(df['minutes'].iloc[0]) if not df.empty else 0
 
-def get_google_maps_duration(origin, destination):
-    """Holt die echte Fahrzeit inkl. Verkehr von Google Maps."""
+def get_google_maps_duration(origin, destination, waypoints=None, avoid_tolls=False):
+    """
+    Holt die Fahrzeit von Google Maps. Unterstützt Wegpunkte und Maut-Optionen.
+    """
     api_key = st.secrets["G_MAPS_API_KEY"]
-    
     url = "https://maps.googleapis.com/maps/api/distancematrix/json"
+    
+    # Wegpunkte für Passrouten formatieren
+    dest_query = f"{'|'.join(waypoints)}|{destination}" if waypoints else destination
+
     params = {
         "origins": origin,
-        "destinations": destination,
+        "destinations": dest_query,
         "mode": "driving",
         "departure_time": "now",
         "traffic_model": "best_guess",
         "key": api_key
     }
     
+    # Füge Maut-Vermeidung hinzu, falls gewünscht
+    if avoid_tolls:
+        params["avoid"] = "tolls"
+    
     try:
         response = requests.get(url, params=params)
         data = response.json()
         
         if data["status"] == "OK":
-            # Zeit in Sekunden umrechnen in Minuten
             seconds = data["rows"][0]["elements"][0]["duration_in_traffic"]["value"]
             return seconds // 60
-        else:
-            st.error(f"Google Maps Fehler: {data['status']}")
-            return 60 # Fallback
-    except Exception as e:
-        st.error(f"Verbindung zu Google fehlgeschlagen: {e}")
-        return 60 # Fallback
+        return 999 
+    except Exception:
+        return 999
+
 
 def get_furka_departure(arrival_time):
     """Berechnet die nächste Abfahrt ab Realp laut offiziellem Fahrplan."""
@@ -362,3 +368,38 @@ def get_furka_status():
             return False # Betrieb eingestellt
             
     return True # Betrieb scheint okay
+
+def get_pass_status():
+    """
+    Fragt den Status der Alpenpässe via alpen-paesse.ch RSS ab.
+    Gibt ein Dictionary zurück: {Name: True/False}
+    """
+    url = "https://www.alpen-paesse.ch/de/alpenpaesse/status.rss"
+    # Standardwerte (Brünig meist offen, andere Wintersperre)
+    status_dict = {
+        "Furkapass": False,
+        "Grimselpass": False,
+        "Nufenenpass": False,
+        "Brünigpass": True 
+    }
+    
+    try:
+        resp = requests.get(url, timeout=10)
+        root = ET.fromstring(resp.content)
+        
+        for item in root.findall('.//item'):
+            title_element = item.find('title')
+            if title_element is None: continue
+            
+            title = title_element.text
+            for p_name in status_dict.keys():
+                if p_name in title:
+                    # Logik: Wenn 'offen' im Text steht -> True, sonst False
+                    if "offen" in title.lower():
+                        status_dict[p_name] = True
+                    elif any(x in title.lower() for x in ["wintersperre", "geschlossen", "gesperrt"]):
+                        status_dict[p_name] = False
+    except Exception as e:
+        print(f"Fehler beim Pass-Status-Check: {e}")
+    
+    return status_dict

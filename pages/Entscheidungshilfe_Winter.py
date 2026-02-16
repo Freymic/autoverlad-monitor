@@ -8,9 +8,13 @@ from logic import (
     get_furka_status
 )
 
-st.set_page_config(page_title="Routen-Check Wallis", layout="wide")
+# 1. Seiteneinstellungen umbenannt
+st.set_page_config(page_title="Routen-Check Wallis | Winter", layout="wide")
 
-st.title("🚗 Deine Reise nach Ried-Mörel")
+# 2. Titel angepasst
+st.title("❄️ Entscheidungshilfe Winter: Deine Reise nach Ried-Mörel")
+st.info("Diese Ansicht berücksichtigt die Autoverlade Furka & Lötschberg.")
+
 start = st.text_input("Startpunkt:", value="Buchrain")
 
 if st.button("Route jetzt berechnen"):
@@ -74,7 +78,6 @@ if st.button("Route jetzt berechnen"):
             st.write(f"⬇️ Fahrt bis Autoverlad Realp: **{anfahrt_f} Min**")
             st.write(f"🏎️ **Ankunft Autoverlad Realp:** {ankunft_realp.strftime('%H:%M')}")
             
-            # Wartezeit Anzeige
             if ist_morgen_f:
                 st.warning(f"⏳ **Nachtpause:** {effektive_warte_f // 60}h {effektive_warte_f % 60}min")
             else:
