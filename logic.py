@@ -345,3 +345,20 @@ def get_loetschberg_departure(arrival_time):
         zug = find_next_train_l(morgen)
         
     return zug
+
+def get_furka_status():
+    """
+    Prüft den RSS-Feed auf Sperrungen.
+    Gibt True zurück, wenn offen, und False, wenn eingestellt.
+    """
+    # Hier kommt dein RSS-Parsing Code hin (z.B. mit feedparser)
+    # Beispiel-Logik:
+    feed_text = "Der Autoverlad Furka ist zur Zeit eingestellt" # Das käme vom Feed
+    
+    status_keywords = ["eingestellt", "geschlossen", "unterbrochen", "Sperrung"]
+    
+    for word in status_keywords:
+        if word.lower() in feed_text.lower():
+            return False # Betrieb eingestellt
+            
+    return True # Betrieb scheint okay
