@@ -8,6 +8,7 @@ import datetime
 import pytz
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
+import google.generativeai as genai
 
 # Konstanten
 DB_NAME = 'autoverlad.db'
@@ -403,3 +404,73 @@ def get_pass_status():
         print(f"Fehler beim Pass-Status-Check: {e}")
     
     return status_dict
+
+
+def get_gemini_summer_report(routen_daten, pass_status):
+
+    try:
+        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+        
+        # Dynamische Modellsuche (deine funktionierende Logik)
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        selected_model = next((n for n in available_models if 'gemini-1.5-flash' in n), available_models[0])
+        model = genai.GenerativeModel(selected_model)
+        
+        machbare = {k: v for k, v in routen_daten.items() if v < 9000}
+        
+        prompt = f"""
+        Du bist ein begeisterter Schweizer Bergführer im Sommer. 
+        Analysiere diese Routen nach Ried-Mörel:
+        Pässe-Status: {pass_status}
+        Fahrzeiten: {machbare}
+
+        Regeln für deine Antwort:
+        1. Wenn Furka- oder Grimselpass OFFEN sind, schwärme kurz von der Aussicht 🏔️.
+        2. Wenn ein Pass nur maximal 20 Min länger dauert als der Autoverlad, empfiehl UNBEDINGT den Pass.
+        3. Erwähne den Autoverlad nur als "Notlösung" für Eilige.
+        4. Die Info über den genöffneten Zustand des Brünigpasses soll nur als Zusatzinfo für den Weg durch den Autoverlad Lötschberg erwähnt werden.
+        5. Sei herzlich, nutze Schweizer Emojis (☀️, 🏎️, 🏔️) und fasse dich in 3-4 Sätzen kurz.
+        """
+
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"🤖 Sommer-KI hat gerade Sonnenstich... ({e})"
+
+
+def get_gemini_winter_report(winter_daten):
+    import google.generativeai as genai
+    import streamlit as st
+
+    try:
+        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+        
+        # Dynamische Modellsuche (deine funktionierende Logik)
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        selected_model = next((n for n in available_models if 'gemini-1.5-flash' in n), available_models[0])
+        model = genai.GenerativeModel(selected_model)
+        
+        # Wir bereiten die Daten leserlich für die KI vor
+        status_furka = "GESCHLOSSEN (Unterbruch)" if winter_daten.get('furka_aktiv') == False else "Aktiv"
+        
+        prompt = f"""
+        Du bist ein präziser Schweizer Reiseassistent für den Winter. 
+        Analysiere die aktuelle Verkehrslage nach Ried-Mörel:
+
+        DATENLAGE:
+        - Startpunkt: {winter_daten.get('start')}
+        - Status Autoverlad Furka: {status_furka}
+        - Route LÖTSCHBERG: {winter_daten.get('total_l')} Min total (Wartezeit: {winter_daten.get('warte_l')} Min, Abfahrt: {winter_daten.get('abfahrt_l')})
+        - Route FURKA: {winter_daten.get('total_f') if winter_daten.get('furka_aktiv') else 'N/A'} Min total (Wartezeit: {winter_daten.get('warte_f')} Min, Abfahrt: {winter_daten.get('abfahrt_f')})
+
+        AUFGABE:
+        1. Wenn der Furkaverlad geschlossen ist, erwähne das SOFORT als Grund, warum man über den Lötschberg muss.
+        2. Vergleiche die Wartezeiten. Wenn man an einem Verlad lange steht, gib einen Tipp (z.B. "genug Zeit für einen Kaffee").
+        3. Nenne die konkrete Uhrzeit der nächsten empfohlenen Zugabfahrt.
+        4. Schreib im herzlichen, aber informierten Stil eines Einheimischen. Max. 4 Sätze. Emojis: ❄️, 🚂, ☕.
+        """
+
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"🤖 Der Winter-Experte hat gerade Verbindungsprobleme... ({e})"
