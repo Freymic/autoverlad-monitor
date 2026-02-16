@@ -216,13 +216,21 @@ def get_latest_wait_times(station):
         )
     return int(df['minutes'].iloc[0]) if not df.empty else 0
 
-def get_google_maps_duration(origin, destination, waypoints=None, avoid_tolls=False):
-    """Holt die echte Fahrzeit inkl. Verkehr. Unterstützt Wegpunkte und Maut-Optionen."""
+def get_google_maps_duration(origin, destination, waypoints=None):
+    """
+    Holt die echte Fahrzeit inkl. Verkehr von Google Maps.
+    Unterstützt jetzt auch Wegpunkte für die Pass-Routen.
+    """
     api_key = st.secrets["G_MAPS_API_KEY"]
     url = "https://maps.googleapis.com/maps/api/distancematrix/json"
     
-    # Wegpunkte für Passrouten formatieren
-    dest_query = f"{'|'.join(waypoints)}|{destination}" if waypoints else destination
+    # Wenn Wegpunkte vorhanden sind, bauen wir sie in das Ziel ein
+    if waypoints:
+        # Google Matrix API berechnet die Zeit von Origin zum Destination via Waypoints
+        # Wir fügen die Waypoints dem Ziel-String hinzu (getrennt durch |)
+        dest_query = f"{'|'.join(waypoints)}|{destination}"
+    else:
+        dest_query = destination
 
     params = {
         "origins": origin,
@@ -230,20 +238,22 @@ def get_google_maps_duration(origin, destination, waypoints=None, avoid_tolls=Fa
         "mode": "driving",
         "departure_time": "now",
         "traffic_model": "best_guess",
-        "avoid": "tolls" if avoid_tolls else None,
         "key": api_key
     }
     
     try:
         response = requests.get(url, params=params)
         data = response.json()
+        
         if data["status"] == "OK":
+            # Zeit in Sekunden -> umrechnen in Minuten
             seconds = data["rows"][0]["elements"][0]["duration_in_traffic"]["value"]
             return seconds // 60
-        return 60
-    except Exception:
-        return 60
-
+        else:
+            return 999 # Fehler-Indikator
+    except Exception as e:
+        st.error(f"Google Maps Fehler: {e}")
+        return 999
 def get_furka_departure(arrival_time):
     """Berechnet die nächste Abfahrt ab Realp laut offiziellem Fahrplan."""
     
