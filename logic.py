@@ -216,21 +216,15 @@ def get_latest_wait_times(station):
         )
     return int(df['minutes'].iloc[0]) if not df.empty else 0
 
-def get_google_maps_duration(origin, destination, waypoints=None):
+def get_google_maps_duration(origin, destination, waypoints=None, avoid_tolls=False):
     """
-    Holt die echte Fahrzeit inkl. Verkehr von Google Maps.
-    Unterstützt jetzt auch Wegpunkte für die Pass-Routen.
+    Holt die Fahrzeit von Google Maps. Unterstützt Wegpunkte und Maut-Optionen.
     """
     api_key = st.secrets["G_MAPS_API_KEY"]
     url = "https://maps.googleapis.com/maps/api/distancematrix/json"
     
-    # Wenn Wegpunkte vorhanden sind, bauen wir sie in das Ziel ein
-    if waypoints:
-        # Google Matrix API berechnet die Zeit von Origin zum Destination via Waypoints
-        # Wir fügen die Waypoints dem Ziel-String hinzu (getrennt durch |)
-        dest_query = f"{'|'.join(waypoints)}|{destination}"
-    else:
-        dest_query = destination
+    # Wegpunkte für Passrouten formatieren
+    dest_query = f"{'|'.join(waypoints)}|{destination}" if waypoints else destination
 
     params = {
         "origins": origin,
@@ -241,19 +235,22 @@ def get_google_maps_duration(origin, destination, waypoints=None):
         "key": api_key
     }
     
+    # Füge Maut-Vermeidung hinzu, falls gewünscht
+    if avoid_tolls:
+        params["avoid"] = "tolls"
+    
     try:
         response = requests.get(url, params=params)
         data = response.json()
         
         if data["status"] == "OK":
-            # Zeit in Sekunden -> umrechnen in Minuten
             seconds = data["rows"][0]["elements"][0]["duration_in_traffic"]["value"]
             return seconds // 60
-        else:
-            return 999 # Fehler-Indikator
-    except Exception as e:
-        st.error(f"Google Maps Fehler: {e}")
+        return 999 
+    except Exception:
         return 999
+
+
 def get_furka_departure(arrival_time):
     """Berechnet die nächste Abfahrt ab Realp laut offiziellem Fahrplan."""
     
