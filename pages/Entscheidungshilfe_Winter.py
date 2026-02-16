@@ -116,18 +116,24 @@ if st.button("Route jetzt berechnen"):
             st.write(f"⬇️ Restliche Fahrt: **{ziel_l} Min**")
             st.success(f"🏁 **Ziel Ried-Mörel:** {ankunft_ziel_l.strftime('%H:%M')}{tag_l}")
 
-    # --- GEMINI WINTER AI REPORT ---
+   # --- GEMINI WINTER AI REPORT ---
     st.divider()
-    st.subheader("🤖 Der Gemini Winter-Check")
+    st.subheader("🤖 Der Gemini Experten-Check")
     
-    winter_daten = {
-        "den Autoverlad Furka": total_f,
-        "den Autoverlad Lötschberg": total_l
+    # Hier packen wir jetzt ALLES rein, was wir oben berechnet haben
+    winter_daten_komplett = {
+        "start": start,
+        "furka_aktiv": furka_aktiv,
+        "total_f": total_f if 'total_f' in locals() else None,
+        "total_l": total_l,
+        "warte_f": effektive_warte_f if 'effektive_warte_f' in locals() else 0,
+        "warte_l": effektive_warte_l,
+        "abfahrt_f": naechster_zug_f.strftime('%H:%M') if naechster_zug_f else "Keine",
+        "abfahrt_l": naechster_zug_l.strftime('%H:%M') if naechster_zug_l else "Keine"
     }
 
-    with st.spinner("Gemini berechnet die gemütlichste Winterroute..."):
-        # Aufruf der spezifischen Winter-KI-Funktion
-        ai_bericht = get_gemini_winter_report(winter_daten)
+    with st.spinner("Gemini analysiert Fahrpläne und Status..."):
+        ai_bericht = get_gemini_winter_report(winter_daten_komplett)
         st.info(ai_bericht, icon="❄️")
 
     # --- FAZIT ---
