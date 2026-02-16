@@ -361,3 +361,38 @@ def get_furka_status():
             return False # Betrieb eingestellt
             
     return True # Betrieb scheint okay
+
+def get_pass_status():
+    """
+    Fragt den Status der Alpenpässe via alpen-paesse.ch RSS ab.
+    Gibt ein Dictionary zurück: {Name: True/False}
+    """
+    url = "https://www.alpen-paesse.ch/de/alpenpaesse/status.rss"
+    # Standardwerte (Brünig meist offen, andere Wintersperre)
+    status_dict = {
+        "Furkapass": False,
+        "Grimselpass": False,
+        "Nufenenpass": False,
+        "Brünigpass": True 
+    }
+    
+    try:
+        resp = requests.get(url, timeout=10)
+        root = ET.fromstring(resp.content)
+        
+        for item in root.findall('.//item'):
+            title_element = item.find('title')
+            if title_element is None: continue
+            
+            title = title_element.text
+            for p_name in status_dict.keys():
+                if p_name in title:
+                    # Logik: Wenn 'offen' im Text steht -> True, sonst False
+                    if "offen" in title.lower():
+                        status_dict[p_name] = True
+                    elif any(x in title.lower() for x in ["wintersperre", "geschlossen", "gesperrt"]):
+                        status_dict[p_name] = False
+    except Exception as e:
+        print(f"Fehler beim Pass-Status-Check: {e}")
+    
+    return status_dict
