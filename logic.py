@@ -8,6 +8,7 @@ import datetime
 import pytz
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
+import google.generativeai as genai
 
 # Konstanten
 DB_NAME = 'autoverlad.db'
@@ -403,3 +404,44 @@ def get_pass_status():
         print(f"Fehler beim Pass-Status-Check: {e}")
     
     return status_dict
+
+
+def get_gemini_traffic_report(routen_daten, pass_status=None):
+    """
+    Universeller Reisebegleiter für Sommer und Winter.
+    """
+    try:
+        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+        model = genai.GenerativeModel('gemini-1.5-flash')
+
+        # Wir bauen dynamisch eine Liste der verfügbaren Optionen
+        status_info = ""
+        if pass_status:
+            for p, offen in pass_status.items():
+                status_info += f"- {p}: {'OFFEN' if offen else 'GESPERRT'}\n"
+        
+        routen_info = ""
+        for name, zeit in routen_daten.items():
+            if zeit < 9000: # Nur valide Routen auflisten
+                routen_info += f"- {name}: {zeit} Min\n"
+
+        prompt = f"""
+        Du bist ein lokaler Schweizer Reisebegleiter. Analysiere diese Daten für die Fahrt nach Ried-Mörel:
+        
+        PASS-STATUS:
+        {status_info if status_info else "Keine Pässe verfügbar (Wintermodus)."}
+        
+        FAHRZEITEN:
+        {routen_info}
+
+        AUFGABE:
+        Erstelle eine kurze, charmante Empfehlung (max. 3 Sätze).
+        - Im Winter: Fokus auf Wartezeiten beim Autoverlad.
+        - Im Sommer: Empfiehl Pässe, wenn sie offen sind und zeitlich Sinn machen (max +20 Min Umweg).
+        - Nutze Schweizer Emojis (🏔️, 🚗, 🚂) und sei herzlich.
+        """
+
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"🤖 Mein Bergführer-Instinkt sagt mir gerade nichts... (Fehler: {e})"
