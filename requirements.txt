@@ -5,3 +5,4 @@ pytz
 requests
 st-gsheets-connection
 streamlit-autorefresh
+google-generativeai
