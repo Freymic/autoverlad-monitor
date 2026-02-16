@@ -408,38 +408,47 @@ def get_pass_status():
 
 def get_gemini_traffic_report(routen_daten, pass_status=None):
     """
-    Erstellt eine Zusammenfassung mit Google Gemini.
-    Behebt den 404-Fehler durch explizite Modell-Adressierung.
+    Erstellt den Reisebericht und behebt den 404-Fehler durch automatische Modell-Suche.
     """
+    import google.generativeai as genai
+    import streamlit as st
+    
     try:
-        import google.generativeai as genai
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         
-        # Falls 'gemini-1.5-flash' einen 404 wirft, probieren wir die 
-        # stabilste Version ohne Versions-Präfix.
-        model = genai.GenerativeModel('gemini-1.5-flash-latest') 
-
-        # Wir filtern die Daten, damit Gemini nur relevante Infos bekommt
-        machbare = {k: v for k, v in routen_daten.items() if v < 9000}
+        # Liste möglicher Modell-IDs (von neu nach alt)
+        model_names = [
+            'gemini-1.5-flash', 
+            'gemini-1.5-flash-001', 
+            'gemini-pro'
+        ]
         
-        prompt = f"""
-        Du bist ein charmanter Schweizer Bergführer. Analyse diese Reisedaten nach Ried-Mörel:
-        Status Pässe: {pass_status}
-        Fahrzeiten: {machbare}
+        model = None
+        # Wir probieren die Liste durch, bis ein Modell akzeptiert wird
+        for name in model_names:
+            try:
+                model = genai.GenerativeModel(name)
+                # Kleiner Test-Aufruf, um zu sehen, ob das Modell existiert
+                test_res = model.generate_content("test", generation_config={"max_output_tokens": 1})
+                if test_res:
+                    break # Erfolg!
+            except Exception:
+                continue
+        
+        if not model:
+            return "🤖 Die KI-Modelle sind gerade nicht erreichbar. Bitte später versuchen."
 
-        Aufgabe: Gib eine kurze Empfehlung (max. 3 Sätze). 
-        Wenn Pässe offen sind, erwähne die schöne Aussicht. 
-        Nutze Emojis wie 🏔️, 🚗, 🚂.
+        # Daten für den echten Prompt vorbereiten
+        machbare = {k: v for k, v in routen_daten.items() if v < 9000}
+        prompt = f"""
+        Du bist ein Schweizer Bergführer. Analyse:
+        Pässe: {pass_status}
+        Zeiten: {machbare}
+        Gib eine kurze Empfehlung (max. 3 Sätze) mit Emojis 🏔️🚂.
         """
 
         response = model.generate_content(prompt)
         return response.text
+
     except Exception as e:
-        # Falls 'gemini-1.5-flash-latest' auch nicht geht, 
-        # versuchen wir es mit dem Standardnamen als Fallback
-        try:
-            model = genai.GenerativeModel('gemini-pro')
-            response = model.generate_content("Hoi! Gib mir eine kurze Begrüssung.")
-            return response.text
-        except:
-            return f"🤖 Gemini hat gerade Funkstille. (Fehler: {str(e)})"
+        return f"🤖 Funkstille in der KI-Zentrale... (Fehler: {str(e)})"
