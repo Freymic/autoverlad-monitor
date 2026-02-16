@@ -1,11 +1,12 @@
 import streamlit as st
 import datetime
+# Importiere die Logik-Funktionen aus deiner logic.py
 from logic import (
     get_latest_wait_times, 
     get_google_maps_duration, 
     get_furka_departure, 
     get_loetschberg_departure,
-    get_furka_status # NEU importieren
+    get_furka_status
 )
 
 st.set_page_config(page_title="Routen-Check Wallis", layout="wide")
@@ -17,13 +18,14 @@ if st.button("Route jetzt berechnen"):
     with st.spinner("Frage Verkehrsdaten und Fahrpläne ab..."):
         jetzt = datetime.datetime.now()
         
-        # --- CHECK: IST FURKA ÜBERHAUPT OFFEN? ---
-        furka_offen = get_furka_status()
+        # --- STATUS CHECK ---
+        # Prüft, ob der Furka laut RSS-Feed überhaupt in Betrieb ist
+        furka_aktiv = get_furka_status()
         
         # --- ROUTE A: FURKA (REALP) ---
         anfahrt_f = get_google_maps_duration(start, "Autoverlad Realp")
         
-        if furka_offen:
+        if furka_aktiv:
             ankunft_realp = jetzt + datetime.timedelta(minutes=anfahrt_f)
             naechster_zug_f = get_furka_departure(ankunft_realp)
             
@@ -39,7 +41,6 @@ if st.button("Route jetzt berechnen"):
             else:
                 total_f = 9999
         else:
-            # Wenn geschlossen, setzen wir die Zeit auf "unendlich"
             total_f = 999999
             naechster_zug_f = None
 
@@ -67,10 +68,10 @@ if st.button("Route jetzt berechnen"):
     # SPALTE FURKA
     with col_f:
         st.subheader("🏔️ Via Furka (Realp)")
-        if not furka_offen:
+        if not furka_aktiv:
             st.error("🚨 **BETRIEB EINGESTELLT**")
-            st.info("Der Autoverlad Furka meldet aktuell einen Betriebsunterbruch laut RSS-Feed.")
-            st.write(f"🏎️ Anfahrt bis Realp wäre: {anfahrt_f} Min")
+            st.info("Der Autoverlad Furka meldet aktuell einen Betriebsunterbruch.")
+            st.write(f"🏎️ Anfahrt bis Autoverlad Realp wäre: {anfahrt_f} Min")
         elif naechster_zug_f:
             ist_morgen_f = naechster_zug_f.date() > jetzt.date()
             if ist_morgen_f:
@@ -81,11 +82,11 @@ if st.button("Route jetzt berechnen"):
                 st.metric("Ankunft", ankunft_ziel_f.strftime('%H:%M'), f"{total_f} Min")
                 st.warning(f"⏳ **Wartezeit:** {effektive_warte_f} Min")
 
-            st.write(f"🏎️ Ankunft Terminal: {ankunft_realp.strftime('%H:%M')}")
+            st.write(f"🏎️ Ankunft Autoverlad Realp: {ankunft_realp.strftime('%H:%M')}")
             st.write(f"🚂 Nächster Zug: **{naechster_zug_f.strftime('%H:%M')} Uhr**")
             st.write(f"🏁 Ziel Ried-Mörel: {ankunft_ziel_f.strftime('%H:%M')} Uhr")
         else:
-            st.error("Kein Fahrplan für Furka gefunden.")
+            st.error("Kein Fahrplan verfügbar.")
 
     # SPALTE LÖTSCHBERG
     with col_l:
@@ -100,19 +101,19 @@ if st.button("Route jetzt berechnen"):
                 st.metric("Ankunft", ankunft_ziel_l.strftime('%H:%M'), f"{total_l} Min")
                 st.warning(f"⏳ **Wartezeit:** {effektive_warte_l} Min")
 
-            st.write(f"🏎️ Ankunft Terminal: {ankunft_kandersteg.strftime('%H:%M')}")
+            st.write(f"🏎️ Ankunft Autoverlad Kandersteg: {ankunft_kandersteg.strftime('%H:%M')}")
             st.write(f"🚂 Nächster Zug: **{naechster_zug_l.strftime('%H:%M')} Uhr**")
             st.write(f"🏁 Ziel Ried-Mörel: {ankunft_ziel_l.strftime('%H:%M')} Uhr")
 
     # --- FAZIT ---
     st.divider()
     
-    if not furka_offen:
-        st.warning("👉 Da der Furka aktuell geschlossen ist, bleibt nur die Route über den Lötschberg (oder via Autobahn/Grimsel, falls offen).")
+    if not furka_aktiv:
+        st.warning("👉 **Hinweis:** Da der Furka aktuell geschlossen ist, bleibt nur die Route über den Lötschberg.")
     elif (naechster_zug_f and naechster_zug_f.date() > jetzt.date()) and \
-       (naechster_zug_l and naechster_zug_l.date() > jetzt.date()):
-        st.info("💡 **Geduld ist gefragt:** Beide Autoverlade haben aktuell Nachtpause.")
+         (naechster_zug_l and naechster_zug_l.date() > jetzt.date()):
+        st.info("💡 **Geduld:** Beide Autoverlade haben aktuell Nachtpause.")
     elif total_f < total_l:
-        st.success(f"✅ **Empfehlung:** Nimm den **Furka**. Du sparst ca. {total_l - total_f} Minuten.")
+        st.success(f"✅ **Empfehlung:** Nimm den **Furka**. Ersparnis: {total_l - total_f} Min.")
     else:
-        st.success(f"✅ **Empfehlung:** Nimm den **Lötschberg**. Du sparst ca. {total_f - total_l} Minuten.")
+        st.success(f"✅ **Empfehlung:** Nimm den **Lötschberg**. Ersparnis: {total_f - total_l} Min.")
