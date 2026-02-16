@@ -5,7 +5,8 @@ from logic import (
     get_google_maps_duration, 
     get_furka_departure, 
     get_loetschberg_departure,
-    get_furka_status
+    get_furka_status,
+    get_gemini_winter_report  # Neu importiert
 )
 
 # 1. Seiteneinstellungen umbenannt
@@ -114,6 +115,20 @@ if st.button("Route jetzt berechnen"):
             st.write(f"🚂 **Zugfahrt:** {zug_l_dauer} Min")
             st.write(f"⬇️ Restliche Fahrt: **{ziel_l} Min**")
             st.success(f"🏁 **Ziel Ried-Mörel:** {ankunft_ziel_l.strftime('%H:%M')}{tag_l}")
+
+    # --- GEMINI WINTER AI REPORT ---
+    st.divider()
+    st.subheader("🤖 Der Gemini Winter-Check")
+    
+    winter_daten = {
+        "den Autoverlad Furka": total_f,
+        "den Autoverlad Lötschberg": total_l
+    }
+
+    with st.spinner("Gemini berechnet die gemütlichste Winterroute..."):
+        # Aufruf der spezifischen Winter-KI-Funktion
+        ai_bericht = get_gemini_winter_report(winter_daten)
+        st.info(ai_bericht, icon="❄️")
 
     # --- FAZIT ---
     st.divider()
