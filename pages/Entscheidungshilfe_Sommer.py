@@ -7,7 +7,7 @@ from logic import (
     get_loetschberg_departure,
     get_furka_status,
     get_pass_status,
-    get_gemini_traffic_report  # Neu importiert
+    get_gemini_summer_report  # Geändert auf den spezifischen Sommer-Report
 )
 
 # 1. Seiteneinstellungen
@@ -126,9 +126,9 @@ if st.button("Sommer-Route berechnen"):
             st.metric("Autoverlad Lötschberg", f"{total_l_verlad} Min")
             st.write(f"⏳ Wartezeit Kandersteg: {effektive_warte_l} Min")
 
-    # --- GEMINI AI REPORT ---
+    # --- GEMINI SUMMER AI REPORT ---
     st.divider()
-    st.subheader("🤖 Der Gemini Reise-Check")
+    st.subheader("🤖 Der Gemini Sommer-Check")
     
     alle_routen = {
         "den Furkapass": zeit_furkapass,
@@ -138,10 +138,10 @@ if st.button("Sommer-Route berechnen"):
         "den Autoverlad Lötschberg": total_l_verlad
     }
 
-    with st.spinner("Gemini analysiert die schönste Route für dich..."):
-        # Wir übergeben die berechneten Zeiten und den Pass-Status
-        ai_bericht = get_gemini_traffic_report(alle_routen, pass_status)
-        st.info(ai_bericht, icon="✨")
+    with st.spinner("Gemini analysiert die schönste Passroute für dich..."):
+        # Wir rufen jetzt die spezifische Sommer-Funktion auf
+        ai_bericht = get_gemini_summer_report(alle_routen, pass_status)
+        st.info(ai_bericht, icon="☀️")
 
     # --- FAZIT SOMMER ---
     machbare_routen = {k: v for k, v in alle_routen.items() if v < 9000}
