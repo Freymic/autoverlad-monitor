@@ -6,6 +6,7 @@ from logic import (
     get_furka_departure, 
     get_loetschberg_departure,
     get_furka_status
+    get_pass_status
 )
 
 # 1. Seiteneinstellungen
