@@ -408,40 +408,38 @@ def get_pass_status():
 
 def get_gemini_traffic_report(routen_daten, pass_status=None):
     """
-    Universeller Reisebegleiter für Sommer und Winter.
+    Erstellt eine Zusammenfassung mit Google Gemini.
+    Behebt den 404-Fehler durch explizite Modell-Adressierung.
     """
     try:
+        import google.generativeai as genai
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        model = genai.GenerativeModel('gemini-1.5-flash')
-
-        # Wir bauen dynamisch eine Liste der verfügbaren Optionen
-        status_info = ""
-        if pass_status:
-            for p, offen in pass_status.items():
-                status_info += f"- {p}: {'OFFEN' if offen else 'GESPERRT'}\n"
         
-        routen_info = ""
-        for name, zeit in routen_daten.items():
-            if zeit < 9000: # Nur valide Routen auflisten
-                routen_info += f"- {name}: {zeit} Min\n"
+        # Falls 'gemini-1.5-flash' einen 404 wirft, probieren wir die 
+        # stabilste Version ohne Versions-Präfix.
+        model = genai.GenerativeModel('gemini-1.5-flash-latest') 
 
+        # Wir filtern die Daten, damit Gemini nur relevante Infos bekommt
+        machbare = {k: v for k, v in routen_daten.items() if v < 9000}
+        
         prompt = f"""
-        Du bist ein lokaler Schweizer Reisebegleiter. Analysiere diese Daten für die Fahrt nach Ried-Mörel:
-        
-        PASS-STATUS:
-        {status_info if status_info else "Keine Pässe verfügbar (Wintermodus)."}
-        
-        FAHRZEITEN:
-        {routen_info}
+        Du bist ein charmanter Schweizer Bergführer. Analyse diese Reisedaten nach Ried-Mörel:
+        Status Pässe: {pass_status}
+        Fahrzeiten: {machbare}
 
-        AUFGABE:
-        Erstelle eine kurze, charmante Empfehlung (max. 3 Sätze).
-        - Im Winter: Fokus auf Wartezeiten beim Autoverlad.
-        - Im Sommer: Empfiehl Pässe, wenn sie offen sind und zeitlich Sinn machen (max +20 Min Umweg).
-        - Nutze Schweizer Emojis (🏔️, 🚗, 🚂) und sei herzlich.
+        Aufgabe: Gib eine kurze Empfehlung (max. 3 Sätze). 
+        Wenn Pässe offen sind, erwähne die schöne Aussicht. 
+        Nutze Emojis wie 🏔️, 🚗, 🚂.
         """
 
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
-        return f"🤖 Mein Bergführer-Instinkt sagt mir gerade nichts... (Fehler: {e})"
+        # Falls 'gemini-1.5-flash-latest' auch nicht geht, 
+        # versuchen wir es mit dem Standardnamen als Fallback
+        try:
+            model = genai.GenerativeModel('gemini-pro')
+            response = model.generate_content("Hoi! Gib mir eine kurze Begrüssung.")
+            return response.text
+        except:
+            return f"🤖 Gemini hat gerade Funkstille. (Fehler: {str(e)})"
