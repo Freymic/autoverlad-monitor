@@ -216,44 +216,32 @@ def get_latest_wait_times(station):
         )
     return int(df['minutes'].iloc[0]) if not df.empty else 0
 
-def get_google_maps_duration(origin, destination, waypoints=None):
-    """Holt die echte Fahrzeit inkl. Verkehr. Unterstützt optionale Wegpunkte für Passrouten."""
+def get_google_maps_duration(origin, destination, waypoints=None, avoid_tolls=False):
+    """Holt die echte Fahrzeit inkl. Verkehr. Unterstützt Wegpunkte und Maut-Optionen."""
     api_key = st.secrets["G_MAPS_API_KEY"]
-    
     url = "https://maps.googleapis.com/maps/api/distancematrix/json"
     
-    # Wenn Wegpunkte vorhanden sind, füge sie dem Ziel oder Ursprung hinzu
-    # (Google Distance Matrix nutzt 'waypoints' nicht direkt wie Directions, 
-    # daher optimieren wir den String für die Route)
-    if waypoints:
-        # Wir nutzen das letzte Wegpunkt-Ziel als eigentliches Ziel für die Matrix 
-        # und führen die Route über die Punkte.
-        path = "|".join(waypoints)
-        origin_query = f"{origin}"
-        dest_query = f"{path}|{destination}"
-    else:
-        origin_query = origin
-        dest_query = destination
+    # Wegpunkte für Passrouten formatieren
+    dest_query = f"{'|'.join(waypoints)}|{destination}" if waypoints else destination
 
     params = {
-        "origins": origin_query,
+        "origins": origin,
         "destinations": dest_query,
         "mode": "driving",
         "departure_time": "now",
         "traffic_model": "best_guess",
+        "avoid": "tolls" if avoid_tolls else None,
         "key": api_key
     }
     
     try:
         response = requests.get(url, params=params)
         data = response.json()
-        
         if data["status"] == "OK":
             seconds = data["rows"][0]["elements"][0]["duration_in_traffic"]["value"]
             return seconds // 60
-        else:
-            return 60 
-    except Exception as e:
+        return 60
+    except Exception:
         return 60
 
 def get_furka_departure(arrival_time):
