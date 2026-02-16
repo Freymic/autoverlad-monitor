@@ -407,48 +407,42 @@ def get_pass_status():
 
 
 def get_gemini_traffic_report(routen_daten, pass_status=None):
-    """
-    Erstellt den Reisebericht und behebt den 404-Fehler durch automatische Modell-Suche.
-    """
     import google.generativeai as genai
     import streamlit as st
-    
+
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        
-        # Liste möglicher Modell-IDs (von neu nach alt)
-        model_names = [
-            'gemini-1.5-flash', 
-            'gemini-1.5-flash-001', 
-            'gemini-pro'
-        ]
-        
-        model = None
-        # Wir probieren die Liste durch, bis ein Modell akzeptiert wird
-        for name in model_names:
-            try:
-                model = genai.GenerativeModel(name)
-                # Kleiner Test-Aufruf, um zu sehen, ob das Modell existiert
-                test_res = model.generate_content("test", generation_config={"max_output_tokens": 1})
-                if test_res:
-                    break # Erfolg!
-            except Exception:
-                continue
-        
-        if not model:
-            return "🤖 Die KI-Modelle sind gerade nicht erreichbar. Bitte später versuchen."
 
-        # Daten für den echten Prompt vorbereiten
+        # 1. Dynamische Suche nach verfügbaren Modellen (folgt deinem Hinweis)
+        available_models = []
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                available_models.append(m.name)
+        
+        if not available_models:
+            return "🤖 Keine kompatiblen KI-Modelle für diesen API-Key gefunden."
+
+        # 2. Wir wählen das beste verfügbare Modell
+        # Priorität: 1.5-flash -> 1.5-pro -> was auch immer da ist
+        selected_model = available_models[0] # Fallback
+        for name in available_models:
+            if 'gemini-1.5-flash' in name:
+                selected_model = name
+                break
+        
+        # 3. Bericht generieren
+        model = genai.GenerativeModel(selected_model)
+        
         machbare = {k: v for k, v in routen_daten.items() if v < 9000}
         prompt = f"""
-        Du bist ein Schweizer Bergführer. Analyse:
+        Du bist ein lokaler Schweizer Reisebegleiter. 
         Pässe: {pass_status}
         Zeiten: {machbare}
-        Gib eine kurze Empfehlung (max. 3 Sätze) mit Emojis 🏔️🚂.
+        Gib eine kurze Empfehlung (2-3 Sätze) mit Emojis 🏔️🚂.
         """
 
         response = model.generate_content(prompt)
         return response.text
 
     except Exception as e:
-        return f"🤖 Funkstille in der KI-Zentrale... (Fehler: {str(e)})"
+        return f"🤖 Fehler bei der Modellsuche: {str(e)}"
