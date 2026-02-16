@@ -5,7 +5,7 @@ from logic import (
     get_google_maps_duration, 
     get_furka_departure, 
     get_loetschberg_departure,
-    get_furka_status
+    get_furka_status,
     get_pass_status
 )
 
