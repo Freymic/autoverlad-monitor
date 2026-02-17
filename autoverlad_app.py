@@ -35,43 +35,7 @@ if gs_success:
 
 st.title("🏔️ Autoverlad Monitor")
 
-# --- TEMPORÄRER API-INSPEKTOR ---
-with st.expander("🔍 Live-Check: Was empfängt die BLS-Schnittstelle gerade?"):
-    import requests
-    test_url = "https://www.bls.ch/api/TrafficInformation/GetNewNotifications?sc_lang=de&sc_site=internet-bls"
-    
-    # Der Header ist entscheidend, damit die BLS-Seite antwortet
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15'
-    }
-    
-    try:
-        res = requests.get(test_url, headers=headers, timeout=10)
-        
-        if res.status_code == 200:
-            if res.text.strip():
-                raw_json = res.json()
-                st.write("### 1. Rohdaten von BLS:")
-                st.json(raw_json)
-                
-                notizen = raw_json.get("trafficInformations", [])
-                if notizen:
-                    st.write("### 2. Analyse der Meldungen:")
-                    for n in notizen:
-                        titel = n.get("title", "Kein Titel")
-                        st.info(f"Meldung: {titel}")
-                        
-                        ist_unterbruch = any(word in titel.lower() for word in ["unterbrochen", "unterbruch", "eingestellt", "sperrung"])
-                        st.write(f"Wird als Unterbruch erkannt? {'✅ JA' if ist_unterbruch else '❌ NEIN'}")
-                else:
-                    st.warning("Keine aktuellen Verkehrsmeldungen in der Liste.")
-            else:
-                st.error("Die API hat eine leere Antwort gesendet.")
-        else:
-            st.error(f"HTTP-Fehler: {res.status_code}")
-            
-    except Exception as e:
-        st.error(f"Fehler beim Abruf: {e}")
+
 
 # --- NEU: ZENTRALE STATUS-MELDUNGEN ---
 if not furka_aktiv or not loetschberg_aktiv:
