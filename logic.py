@@ -372,37 +372,47 @@ def get_furka_status():
 
 def get_loetschberg_status():
     """
-    Prüft die BLS API auf aktuelle Verkehrsmeldungen zum Autoverlad Lötschberg.
-    Extrahiert Daten aus dem Feld 'trafficInformations' und scannt den 'title'.
+    Prüft die BLS API auf aktuelle Verkehrsmeldungen.
+    Optimiert für die Erkennung von Unterbrüchen im 'trafficInformations' Array.
     """
+    # WICHTIG: Die URL muss saubere "&" Zeichen enthalten, kein "&amp;"
     url = "https://www.bls.ch/api/TrafficInformation/GetNewNotifications?sc_lang=de&sc_site=internet-bls"
     
     try:
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
             data = response.json()
-            # Die BLS API liefert ein Objekt mit dem Key 'trafficInformations'
+            
+            # Die API liefert ein Objekt, das die Liste 'trafficInformations' enthält
             notifications = data.get("trafficInformations", [])
             
-            # Relevante Begriffe für einen Unterbruch
-            alarm_keywords = ["eingestellt", "unterbrochen", "Sperrung", "Unterbruch", "keine Verlademöglichkeit"]
+            # Wenn keine Meldungen da sind, ist der Betrieb okay
+            if not notifications:
+                return True
+            
+            # Begriffe, die auf einen Stopp hinweisen
+            alarm_keywords = ["unterbrochen", "eingestellt", "sperrung", "keine verlademöglichkeit", "unterbruch"]
             
             for note in notifications:
-                # In der aktuellen API-Antwort ist der Text im Feld 'title'
+                # Wir prüfen den 'title' (wie in deinem JSON-Beispiel)
+                # .lower() macht die Suche unempfindlich gegenüber Gross-/Kleinschreibung
                 text = note.get("title", "").lower()
                 
-                # Prüfung, ob die Meldung den Autoverlad Lötschberg betrifft
-                if any(x in text for x in ["kandersteg", "goppenstein", "autoverlad"]):
+                # Debugging Hilfe: Schreibt die gefundenen Titel ins Log/Terminal
+                # print(f"Prüfe BLS Meldung: {text[:50]}...") 
+
+                # Betrifft es den Autoverlad?
+                if any(x in text for x in ["kandersteg", "goppenstein", "autoverlad", "lötschberg"]):
                     for word in alarm_keywords:
-                        if word.lower() in text:
-                            # Ausschluss von Entwarnungen
+                        if word in text:
+                            # Falls "aufgehoben" im Text steht, ist es eine Entwarnung -> weiter prüfen
                             if "aufgehoben" not in text:
-                                return False # Betrieb gestört
+                                return False # Ein aktiver Unterbruch wurde gefunden!
         
-        return True # Alles okay oder keine Sperrmeldung gefunden
+        return True # Keine kritische Meldung gefunden
     except Exception as e:
         print(f"Fehler beim BLS-Status-Check: {e}")
-        return True # Im Zweifelsfall True
+        return True # Im Fehlerfall True, um den User nicht unnötig zu blockieren
 
 def get_pass_status():
     """
