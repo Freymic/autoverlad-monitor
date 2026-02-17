@@ -38,33 +38,40 @@ st.title("🏔️ Autoverlad Monitor")
 # --- TEMPORÄRER API-INSPEKTOR ---
 with st.expander("🔍 Live-Check: Was empfängt die BLS-Schnittstelle gerade?"):
     import requests
-    # Wir nutzen die exakte URL ohne HTML-Fehler
     test_url = "https://www.bls.ch/api/TrafficInformation/GetNewNotifications?sc_lang=de&sc_site=internet-bls"
     
+    # Der Header ist entscheidend, damit die BLS-Seite antwortet
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15'
+    }
+    
     try:
-        res = requests.get(test_url, timeout=5)
-        raw_json = res.json()
+        res = requests.get(test_url, headers=headers, timeout=10)
         
-        st.write("### 1. Rohdaten von BLS:")
-        st.json(raw_json) # Hier siehst du das gesamte JSON-Paket
-        
-        # Wir simulieren die Suche
-        notizen = raw_json.get("trafficInformations", [])
-        if notizen:
-            st.write("### 2. Gefundene Meldungen:")
-            for n in notizen:
-                titel = n.get("title", "KEIN TITEL GEFUNDEN")
-                st.info(f"Meldungstext: {titel}")
+        if res.status_code == 200:
+            if res.text.strip():
+                raw_json = res.json()
+                st.write("### 1. Rohdaten von BLS:")
+                st.json(raw_json)
                 
-                # Check auf Keywords
-                ist_unterbruch = any(word in titel.lower() for word in ["unterbrochen", "unterbruch", "eingestellt"])
-                st.write(f"Wird als Unterbruch erkannt? {'❌ NEIN' if not ist_unterbruch else '✅ JA'}")
+                notizen = raw_json.get("trafficInformations", [])
+                if notizen:
+                    st.write("### 2. Analyse der Meldungen:")
+                    for n in notizen:
+                        titel = n.get("title", "Kein Titel")
+                        st.info(f"Meldung: {titel}")
+                        
+                        ist_unterbruch = any(word in titel.lower() for word in ["unterbrochen", "unterbruch", "eingestellt", "sperrung"])
+                        st.write(f"Wird als Unterbruch erkannt? {'✅ JA' if ist_unterbruch else '❌ NEIN'}")
+                else:
+                    st.warning("Keine aktuellen Verkehrsmeldungen in der Liste.")
+            else:
+                st.error("Die API hat eine leere Antwort gesendet.")
         else:
-            st.warning("Die Liste 'trafficInformations' ist aktuell leer. (Keine Meldungen vorhanden)")
+            st.error(f"HTTP-Fehler: {res.status_code}")
             
     except Exception as e:
         st.error(f"Fehler beim Abruf: {e}")
-# --- ENDE INSPEKTOR ---
 
 # --- NEU: ZENTRALE STATUS-MELDUNGEN ---
 if not furka_aktiv or not loetschberg_aktiv:
