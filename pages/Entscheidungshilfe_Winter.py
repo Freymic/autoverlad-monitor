@@ -6,6 +6,7 @@ from logic import (
     get_furka_departure, 
     get_loetschberg_departure,
     get_furka_status,
+    get_loetschberg_status,
     get_gemini_winter_report  # Neu importiert
 )
 
