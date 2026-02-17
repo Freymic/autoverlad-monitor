@@ -6,9 +6,9 @@ from logic import (
     get_furka_departure, 
     get_loetschberg_departure,
     get_furka_status,
-    get_loetschberg_status,
+    get_loetschberg_status, # Neu importiert
     get_pass_status,
-    get_gemini_summer_report  # Geändert auf den spezifischen Sommer-Report
+    get_gemini_summer_report
 )
 
 # 1. Seiteneinstellungen
@@ -28,19 +28,16 @@ if st.button("Sommer-Route berechnen"):
         pass_status = get_pass_status()
         
         # --- 1. PASS-ROUTEN (DIREKT) ---
-        # A) FURKAPASS
         if pass_status.get("Furkapass", False):
             zeit_furkapass = get_google_maps_duration(start, "Ried-Mörel", waypoints=["Furkapass"])
         else:
             zeit_furkapass = 9999
 
-        # B) GRIMSELPASS (via Brünig)
         if pass_status.get("Grimselpass", False) and pass_status.get("Brünigpass", True):
             zeit_grimsel = get_google_maps_duration(start, "Ried-Mörel", waypoints=["Brünigpass", "Grimselpass"])
         else:
             zeit_grimsel = 9999
 
-        # C) NUFENENPASS (via Gotthard)
         if pass_status.get("Nufenenpass", False):
             zeit_nufenen = get_google_maps_duration(start, "Ried-Mörel", waypoints=["Airolo", "Nufenenpass"])
         else:
@@ -48,8 +45,9 @@ if st.button("Sommer-Route berechnen"):
 
         # --- 2. AUTOVERLAD-ROUTEN ---
         furka_verlad_aktiv = get_furka_status()
+        loetschberg_verlad_aktiv = get_loetschberg_status() # Neu: Status Lötschberg prüfen
         
-        # Furka Verlad
+        # Furka Verlad Berechnung
         anfahrt_f = get_google_maps_duration(start, "Autoverlad Realp")
         if furka_verlad_aktiv:
             ankunft_realp = jetzt + datetime.timedelta(minutes=anfahrt_f)
@@ -63,18 +61,21 @@ if st.button("Sommer-Route berechnen"):
         else: 
             total_f_verlad = 999999
 
-        # Lötschberg Verlad
+        # Lötschberg Verlad Berechnung
         anfahrt_l = get_google_maps_duration(start, "Autoverlad Kandersteg")
-        ankunft_kandersteg = jetzt + datetime.timedelta(minutes=anfahrt_l)
-        naechster_zug_l = get_loetschberg_departure(ankunft_kandersteg)
-        if naechster_zug_l:
-            warte_min_l = int((naechster_zug_l - ankunft_kandersteg).total_seconds() / 60)
-            effektive_warte_l = max(warte_min_l, get_latest_wait_times("Kandersteg"))
-            total_l_verlad = anfahrt_l + effektive_warte_l + 20 + get_google_maps_duration("Goppenstein", "Ried-Mörel")
-        else: 
-            total_l_verlad = 9999
+        if loetschberg_verlad_aktiv: # Neu: Prüfung eingebaut
+            ankunft_kandersteg = jetzt + datetime.timedelta(minutes=anfahrt_l)
+            naechster_zug_l = get_loetschberg_departure(ankunft_kandersteg)
+            if naechster_zug_l:
+                warte_min_l = int((naechster_zug_l - ankunft_kandersteg).total_seconds() / 60)
+                effektive_warte_l = max(warte_min_l, get_latest_wait_times("Kandersteg"))
+                total_l_verlad = anfahrt_l + effektive_warte_l + 20 + get_google_maps_duration("Goppenstein", "Ried-Mörel")
+            else: 
+                total_l_verlad = 9999
+        else:
+            total_l_verlad = 999999
 
-    # --- UI DARSTELLUNG ---
+    # --- UI DARSTELLUNG PÄSSE ---
     st.subheader("⛰️ Über die Passstrassen")
     col1, col2, col3 = st.columns(3)
     
@@ -104,6 +105,7 @@ if st.button("Sommer-Route berechnen"):
 
     st.divider()
 
+    # --- UI DARSTELLUNG VERLAD ---
     st.subheader("🚂 Via Autoverlad")
     col_f, col_l = st.columns(2)
 
@@ -121,7 +123,9 @@ if st.button("Sommer-Route berechnen"):
             st.write(f"⏳ Wartezeit Realp: {effektive_warte_f} Min")
 
     with col_l:
-        if total_l_verlad >= 9999:
+        if not loetschberg_verlad_aktiv: # Neu: Rote Warnung für Lötschberg
+            st.error("🚨 Autoverlad Lötschberg eingestellt")
+        elif total_l_verlad >= 9999:
             st.error("Kein Zug mehr heute")
         else:
             st.metric("Autoverlad Lötschberg", f"{total_l_verlad} Min")
@@ -140,7 +144,7 @@ if st.button("Sommer-Route berechnen"):
     }
 
     with st.spinner("Gemini analysiert die schönste Passroute für dich..."):
-        # Wir rufen jetzt die spezifische Sommer-Funktion auf
+        # Wir übergeben hier auch den Status der Verlade im Dictionary für Gemini, falls du den Prompt anpassen willst
         ai_bericht = get_gemini_summer_report(alle_routen, pass_status)
         st.info(ai_bericht, icon="☀️")
 
