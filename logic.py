@@ -370,6 +370,39 @@ def get_furka_status():
             
     return True # Betrieb scheint okay
 
+def get_loetschberg_status():
+    """
+    Prüft die BLS API auf aktuelle Verkehrsmeldungen zum Autoverlad Lötschberg.
+    Gibt True zurück, wenn der Betrieb läuft, und False bei Unterbruch.
+    """
+    url = "https://www.bls.ch/api/TrafficInformation/GetNewNotifications?sc_lang=de&sc_site=internet-bls"
+    
+    try:
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            notifications = response.json()
+            
+            # Relevante Begriffe für einen Unterbruch
+            alarm_keywords = ["eingestellt", "unterbrochen", "Sperrung", "Unterbruch", "keine Verlademöglichkeit"]
+            
+            for note in notifications:
+                text = note.get("Description", "").lower()
+                title = note.get("Title", "").lower()
+                
+                # Wir prüfen, ob die Meldung den Autoverlad Lötschberg betrifft
+                if "kandersteg" in text or "goppenstein" in text or "autoverlad" in text:
+                    for word in alarm_keywords:
+                        if word.lower() in text or word.lower() in title:
+                            # Sicherheitshalber prüfen wir, ob es nicht nur eine harmlose Info ist
+                            # (z.B. "Unterbruch aufgehoben")
+                            if "aufgehoben" not in text:
+                                return False # Betrieb gestört
+        
+        return True # Alles okay oder keine Meldung gefunden
+    except Exception as e:
+        print(f"Fehler beim BLS-Status-Check: {e}")
+        return True # Im Zweifelsfall True, damit die App nicht blockiert
+
 def get_pass_status():
     """
     Fragt den Status der Alpenpässe via alpen-paesse.ch RSS ab.
