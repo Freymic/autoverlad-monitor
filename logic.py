@@ -370,6 +370,37 @@ def get_furka_status():
             
     return True # Betrieb scheint okay
 
+def get_loetschberg_status():
+    url = "https://www.bls.ch/api/TrafficInformation/GetNewNotifications?sc_lang=de&sc_site=internet-bls"
+    # Ein User-Agent signalisiert der Webseite, dass ein Browser anfragt
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            # Falls die API doch mal leeren Text schickt, fangen wir das ab
+            if not response.text.strip():
+                return True
+                
+            data = response.json()
+            notifications = data.get("trafficInformations", [])
+            
+            alarm_keywords = ["unterbrochen", "eingestellt", "sperrung", "unterbruch", "keine verlademöglichkeit"]
+            
+            for note in notifications:
+                text = note.get("title", "").lower()
+                # Check auf Autoverlad Bezug
+                if any(x in text for x in ["kandersteg", "goppenstein", "autoverlad"]):
+                    if any(word in text for word in alarm_keywords):
+                        if "aufgehoben" not in text:
+                            return False # Unterbruch bestätigt
+        return True
+    except Exception as e:
+        print(f"BLS Error: {e}")
+        return True
+
 def get_pass_status():
     """
     Fragt den Status der Alpenpässe via alpen-paesse.ch RSS ab.
@@ -407,29 +438,35 @@ def get_pass_status():
 
 
 def get_gemini_summer_report(routen_daten, pass_status):
-
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         
-        # Dynamische Modellsuche (deine funktionierende Logik)
+        # Dynamische Modellsuche
         available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         selected_model = next((n for n in available_models if 'gemini-1.5-flash' in n), available_models[0])
         model = genai.GenerativeModel(selected_model)
         
+        # Prüfung, welche Wege überhaupt noch offen sind
         machbare = {k: v for k, v in routen_daten.items() if v < 9000}
-        
-        prompt = f"""
-        Du bist ein begeisterter Schweizer Bergführer im Sommer. 
-        Analysiere diese Routen nach Ried-Mörel:
-        Pässe-Status: {pass_status}
-        Fahrzeiten: {machbare}
+        paesse_offen = any([pass_status.get("Furkapass"), pass_status.get("Grimselpass"), pass_status.get("Nufenenpass")])
+        verlade_offen = any([routen_daten.get("den Autoverlad Furka", 999999) < 9000, 
+                             routen_daten.get("den Autoverlad Lötschberg", 999999) < 9000])
 
-        Regeln für deine Antwort:
-        1. Wenn Furka- oder Grimselpass OFFEN sind, schwärme kurz von der Aussicht 🏔️.
-        2. Wenn ein Pass nur maximal 20 Min länger dauert als der Autoverlad, empfiehl UNBEDINGT den Pass.
-        3. Erwähne den Autoverlad nur als "Notlösung" für Eilige.
-        4. Die Info über den genöffneten Zustand des Brünigpasses soll nur als Zusatzinfo für den Weg durch den Autoverlad Lötschberg erwähnt werden.
-        5. Sei herzlich, nutze Schweizer Emojis (☀️, 🏎️, 🏔️) und fasse dich in 3-4 Sätzen kurz.
+        prompt = f"""
+        Du bist ein herzlicher, urchiger Schweizer Bergführer im Sommer.
+        Analysiere diese Lage für die Fahrt nach Ried-Mörel:
+        - Pässe-Status: {pass_status}
+        - Fahrzeiten (was noch geht): {machbare}
+
+        STRATEGISCHE ANWEISUNGEN:
+        1. FALL BEIDE VERLADE ZU (Furka & Lötschberg): Preise die Pässe (Furka, Grimsel oder Nufenen) als die 'perfekte Ausweichroute' an. Schwärme von der Freiheit auf der Strasse und dem Panorama! 🏔️
+        2. FALL ALLES ZU (Verlade UND Pässe): Schlage mit einem Augenzwinkern vor, jetzt den Helikopter (Air Zermatt Style) zu rufen, da Ried-Mörel sonst nur noch für Adler erreichbar ist. 🚁
+        3. FALL NORMALBETRIEB: Wenn ein Pass offen ist und maximal 20 Min länger dauert als der Tunnel, befiehl fast schon den Pass zu nehmen – wegen der Aussicht. ☀️
+        4. ZUSATZINFO: Brünigpass-Status nur erwähnen, wenn Lötschberg ein Thema ist.
+
+        TONFALL:
+        - Begeistert, herzlich, maximal 4 Sätze.
+        - Emojis: 🏔️, ☀️, 🏎️, 🚁, 🧀.
         """
 
         response = model.generate_content(prompt)
@@ -445,32 +482,33 @@ def get_gemini_winter_report(winter_daten):
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         
-        # Dynamische Modellsuche (deine funktionierende Logik)
+        # Dynamische Modellsuche (deine bewährte Logik)
         available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         selected_model = next((n for n in available_models if 'gemini-1.5-flash' in n), available_models[0])
         model = genai.GenerativeModel(selected_model)
         
-        # Wir bereiten die Daten leserlich für die KI vor
-        status_furka = "GESCHLOSSEN (Unterbruch)" if winter_daten.get('furka_aktiv') == False else "Aktiv"
+        # Status-Checks für den Prompt vorbereiten
+        f_aktiv = winter_daten.get('furka_aktiv', False)
+        l_aktiv = winter_daten.get('loetschberg_aktiv', False)
         
         prompt = f"""
-        Du bist ein präziser Schweizer Reiseassistent für den Winter. 
-        Analysiere die aktuelle Verkehrslage nach Ried-Mörel:
+        Du bist ein humorvoller, aber sehr kompetenter Schweizer Bergführer.
+        Analysiere die aktuelle Winter-Verkehrslage nach Ried-Mörel:
 
-        DATENLAGE:
-        - Startpunkt: {winter_daten.get('start')}
-        - Status Autoverlad Furka: {status_furka}
-        - Route LÖTSCHBERG: {winter_daten.get('total_l')} Min total (Wartezeit: {winter_daten.get('warte_l')} Min, Abfahrt: {winter_daten.get('abfahrt_l')})
-        - Route FURKA: {winter_daten.get('total_f') if winter_daten.get('furka_aktiv') else 'N/A'} Min total (Wartezeit: {winter_daten.get('warte_f')} Min, Abfahrt: {winter_daten.get('abfahrt_f')})
+        DATEN:
+        - Autoverlad Lötschberg: {'AKTIV' if l_aktiv else 'GESPERRT'} (Zeit: {winter_daten.get('total_l')} Min)
+        - Autoverlad Furka: {'AKTIV' if f_aktiv else 'GESPERRT'} (Zeit: {winter_daten.get('total_f')} Min)
+        - Nächste Abfahrten: Lötschberg {winter_daten.get('abfahrt_l')}, Furka {winter_daten.get('abfahrt_f')}
 
         AUFGABE:
-        1. Wenn der Furkaverlad geschlossen ist, erwähne das SOFORT als Grund, warum man über den Lötschberg muss.
-        2. Vergleiche die Wartezeiten. Wenn man an einem Verlad lange steht, gib einen Tipp (z.B. "genug Zeit für einen Kaffee").
-        3. Nenne die konkrete Uhrzeit der nächsten empfohlenen Zugabfahrt.
-        4. Schreib im herzlichen, aber informierten Stil eines Einheimischen. Max. 4 Sätze. Emojis: ❄️, 🚂, ☕.
+        1. TOTALAUSFALL: Wenn BEIDE Verladestationen gesperrt sind, rate dem User DRINGEND, zu Hause zu bleiben. 
+           Empfiehl eine lustige Indoor-Aktivität (z.B. Käsefondue im Wohnzimmer, "Trocken-Skifahren" auf dem Teppich oder Walliser Weisswein-Degustation im Pyjama).
+        2. NUR EINER OFFEN: Erkläre kurz, dass dies aktuell die einzige Verbindung ins Wallis ist.
+        3. BEIDE OFFEN: Vergleiche Wartezeiten und Abfahrten, empfiehl die effizienteste Route.
+        4. TONFALL: Herzlich, "urchig" schweizerisch, max. 4 Sätze. Nutze Emojis: ❄️, 🧀, 🍷, 🚂.
         """
 
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
-        return f"🤖 Der Winter-Experte hat gerade Verbindungsprobleme... ({e})"
+        return f"🤖 Der Winter-Guide hat gerade kalte Füsse bekommen... (Fehler: {e})"

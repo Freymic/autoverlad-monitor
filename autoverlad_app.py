@@ -2,20 +2,29 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 import altair as alt
-from datetime import datetime
-# Importiere get_furka_status zusätzlich aus deiner logic.py
-from logic import fetch_all_data, init_db, save_to_db, save_to_google_sheets, DB_NAME, CH_TZ, get_furka_status
+import datetime
+# Importiere get_loetschberg_status zusätzlich aus deiner logic.py
+from logic import (
+    fetch_all_data, 
+    init_db, 
+    save_to_db, 
+    save_to_google_sheets, 
+    DB_NAME, 
+    CH_TZ, 
+    get_furka_status,
+    get_loetschberg_status  # NEU importiert
+)
 from streamlit_gsheets import GSheetsConnection
 from streamlit_autorefresh import st_autorefresh
-import datetime # Doppelt hält besser für die Stabilität
 
 # 1. Seiteneinstellungen
 st.set_page_config(page_title="Autoverlad Monitor", layout="wide")
 
 # 2. Daten initialisieren & abrufen
-init_db()  # Automatischer Restore aus GSheets
+init_db()  
 data = fetch_all_data()
-furka_aktiv = get_furka_status() # NEU: Status aus RSS-Feed prüfen
+furka_aktiv = get_furka_status() 
+loetschberg_aktiv = get_loetschberg_status() # NEU: BLS Status prüfen
 
 # Speichern in beide Systeme
 save_to_db(data)
@@ -26,17 +35,25 @@ if gs_success:
 
 st.title("🏔️ Autoverlad Monitor")
 
-# --- NEU: ZENTRALE STATUS-MELDUNG ---
-if not furka_aktiv:
-    st.error("🚨 **Hinweis:** Der Verladbetrieb am Furka (Realp/Oberwald) ist aktuell **eingestellt**.")
 
-# --- 1. METRIKEN (Erweitert um Status-Logik) ---
+
+# --- NEU: ZENTRALE STATUS-MELDUNGEN ---
+if not furka_aktiv or not loetschberg_aktiv:
+    if not furka_aktiv:
+        st.error("🚨 **Hinweis:** Der Verladbetrieb am **Furka** (Realp/Oberwald) ist aktuell **eingestellt**.")
+    if not loetschberg_aktiv:
+        st.error("🚨 **Hinweis:** Der Verladbetrieb am **Lötschberg** (Kandersteg/Goppenstein) ist aktuell **eingestellt**.")
+
+# --- 1. METRIKEN ---
 cols = st.columns(4)
 for i, (name, d) in enumerate(data.items()):
     ist_furka = name in ["Realp", "Oberwald"]
+    ist_loetsch = name in ["Kandersteg", "Goppenstein"]
     
-    if ist_furka and not furka_aktiv:
-        # Anzeige wenn geschlossen
+    # Logik für Sperrung Furka ODER Lötschberg
+    gesperrt = (ist_furka and not furka_aktiv) or (ist_loetsch and not loetschberg_aktiv)
+    
+    if gesperrt:
         cols[i % 4].metric(
             label=name, 
             value="GESPERRT", 
@@ -44,20 +61,20 @@ for i, (name, d) in enumerate(data.items()):
             delta_color="inverse"
         )
     else:
-        # Normale Anzeige
+        # Normale Anzeige der Wartezeit
         cols[i % 4].metric(label=name, value=f"{d['min']} Min")
 
-# --- 2. DATEN LADEN ---
+# --- 2. DATEN LADEN (Historie für Chart) ---
 with sqlite3.connect(DB_NAME) as conn:
     df = pd.read_sql_query("SELECT * FROM stats WHERE timestamp >= datetime('now', '-24 hours')", conn)
     df_history = pd.read_sql_query("SELECT * FROM stats ORDER BY timestamp DESC LIMIT 100", conn)
 
 # --- 3. TREND CHART ---
 st.subheader("📈 24h Trend")
-
 if not df.empty:
     df_plot = df.copy()
     df_plot['timestamp'] = pd.to_datetime(df_plot['timestamp'])
+    # Filter für Ausreißer (z.B. Nachtpausen/Sperren-Dummys)
     df_plot = df_plot[df_plot['minutes'] < 500]
     
     chart = alt.Chart(df_plot).mark_line(
@@ -79,17 +96,17 @@ if not df.empty:
 else:
     st.info("Noch keine Daten vorhanden.")
 
-# --- 4. DEBUG BEREICH (Erweitert) ---
+# --- 4. DEBUG BEREICH ---
 st.markdown("---")
 with st.expander("🛠️ Debug Informationen"):
-    st.write(f"Furka-Status (RSS): **{'✅ Aktiv' if furka_aktiv else '❌ Eingestellt'}**")
+    col_stat1, col_stat2 = st.columns(2)
+    col_stat1.write(f"Furka-Status (RSS): **{'✅ Aktiv' if furka_aktiv else '❌ Eingestellt'}**")
+    col_stat2.write(f"Lötschberg-Status (API): **{'✅ Aktiv' if loetschberg_aktiv else '❌ Eingestellt'}**")
     
     tab1, tab2 = st.tabs(["JSON Rohdaten", "Datenbank Historie"])
     with tab1:
-        st.write("Letzte API-Antwort:")
         st.json(data)
     with tab2:
-        st.write("Letzte Einträge aus SQLite:")
         st.dataframe(df_history, use_container_width=True)
 
 # --- 5. STATUS & CLOUD-INFO ---
@@ -101,7 +118,6 @@ except Exception:
 
 # --- 6. DYNAMISCHER AUTOREFRESH ---
 now = datetime.datetime.now(CH_TZ)
-
 seconds_past_interval = (now.minute % 5) * 60 + now.second
 seconds_to_wait = (300 - seconds_past_interval) + 10 
 
@@ -109,5 +125,4 @@ if seconds_to_wait < 10:
     seconds_to_wait += 300
 
 st_autorefresh(interval=seconds_to_wait * 1000, key="auto_sync_trigger")
-
 st.caption(f"Letztes Update: {now.strftime('%H:%M:%S')} | Nächstes Update in ~{int(seconds_to_wait)}s")
