@@ -440,29 +440,35 @@ def get_pass_status():
 
 
 def get_gemini_summer_report(routen_daten, pass_status):
-
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         
-        # Dynamische Modellsuche (deine funktionierende Logik)
+        # Dynamische Modellsuche
         available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         selected_model = next((n for n in available_models if 'gemini-1.5-flash' in n), available_models[0])
         model = genai.GenerativeModel(selected_model)
         
+        # Prüfung, welche Wege überhaupt noch offen sind
         machbare = {k: v for k, v in routen_daten.items() if v < 9000}
-        
-        prompt = f"""
-        Du bist ein begeisterter Schweizer Bergführer im Sommer. 
-        Analysiere diese Routen nach Ried-Mörel:
-        Pässe-Status: {pass_status}
-        Fahrzeiten: {machbare}
+        paesse_offen = any([pass_status.get("Furkapass"), pass_status.get("Grimselpass"), pass_status.get("Nufenenpass")])
+        verlade_offen = any([routen_daten.get("den Autoverlad Furka", 999999) < 9000, 
+                             routen_daten.get("den Autoverlad Lötschberg", 999999) < 9000])
 
-        Regeln für deine Antwort:
-        1. Wenn Furka- oder Grimselpass OFFEN sind, schwärme kurz von der Aussicht 🏔️.
-        2. Wenn ein Pass nur maximal 20 Min länger dauert als der Autoverlad, empfiehl UNBEDINGT den Pass.
-        3. Erwähne den Autoverlad nur als "Notlösung" für Eilige.
-        4. Die Info über den genöffneten Zustand des Brünigpasses soll nur als Zusatzinfo für den Weg durch den Autoverlad Lötschberg erwähnt werden.
-        5. Sei herzlich, nutze Schweizer Emojis (☀️, 🏎️, 🏔️) und fasse dich in 3-4 Sätzen kurz.
+        prompt = f"""
+        Du bist ein herzlicher, urchiger Schweizer Bergführer im Sommer.
+        Analysiere diese Lage für die Fahrt nach Ried-Mörel:
+        - Pässe-Status: {pass_status}
+        - Fahrzeiten (was noch geht): {machbare}
+
+        STRATEGISCHE ANWEISUNGEN:
+        1. FALL BEIDE VERLADE ZU (Furka & Lötschberg): Preise die Pässe (Furka, Grimsel oder Nufenen) als die 'perfekte Ausweichroute' an. Schwärme von der Freiheit auf der Strasse und dem Panorama! 🏔️
+        2. FALL ALLES ZU (Verlade UND Pässe): Schlage mit einem Augenzwinkern vor, jetzt den Helikopter (Air Zermatt Style) zu rufen, da Ried-Mörel sonst nur noch für Adler erreichbar ist. 🚁
+        3. FALL NORMALBETRIEB: Wenn ein Pass offen ist und maximal 20 Min länger dauert als der Tunnel, befiehl fast schon den Pass zu nehmen – wegen der Aussicht. ☀️
+        4. ZUSATZINFO: Brünigpass-Status nur erwähnen, wenn Lötschberg ein Thema ist.
+
+        TONFALL:
+        - Begeistert, herzlich, maximal 4 Sätze.
+        - Emojis: 🏔️, ☀️, 🏎️, 🚁, 🧀.
         """
 
         response = model.generate_content(prompt)
