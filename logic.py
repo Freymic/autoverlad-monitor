@@ -478,32 +478,33 @@ def get_gemini_winter_report(winter_daten):
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         
-        # Dynamische Modellsuche (deine funktionierende Logik)
+        # Dynamische Modellsuche (deine bewährte Logik)
         available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         selected_model = next((n for n in available_models if 'gemini-1.5-flash' in n), available_models[0])
         model = genai.GenerativeModel(selected_model)
         
-        # Wir bereiten die Daten leserlich für die KI vor
-        status_furka = "GESCHLOSSEN (Unterbruch)" if winter_daten.get('furka_aktiv') == False else "Aktiv"
+        # Status-Checks für den Prompt vorbereiten
+        f_aktiv = winter_daten.get('furka_aktiv', False)
+        l_aktiv = winter_daten.get('loetschberg_aktiv', False)
         
         prompt = f"""
-        Du bist ein präziser Schweizer Reiseassistent für den Winter. 
-        Analysiere die aktuelle Verkehrslage nach Ried-Mörel:
+        Du bist ein humorvoller, aber sehr kompetenter Schweizer Bergführer.
+        Analysiere die aktuelle Winter-Verkehrslage nach Ried-Mörel:
 
-        DATENLAGE:
-        - Startpunkt: {winter_daten.get('start')}
-        - Status Autoverlad Furka: {status_furka}
-        - Route LÖTSCHBERG: {winter_daten.get('total_l')} Min total (Wartezeit: {winter_daten.get('warte_l')} Min, Abfahrt: {winter_daten.get('abfahrt_l')})
-        - Route FURKA: {winter_daten.get('total_f') if winter_daten.get('furka_aktiv') else 'N/A'} Min total (Wartezeit: {winter_daten.get('warte_f')} Min, Abfahrt: {winter_daten.get('abfahrt_f')})
+        DATEN:
+        - Autoverlad Lötschberg: {'AKTIV' if l_aktiv else 'GESPERRT'} (Zeit: {winter_daten.get('total_l')} Min)
+        - Autoverlad Furka: {'AKTIV' if f_aktiv else 'GESPERRT'} (Zeit: {winter_daten.get('total_f')} Min)
+        - Nächste Abfahrten: Lötschberg {winter_daten.get('abfahrt_l')}, Furka {winter_daten.get('abfahrt_f')}
 
         AUFGABE:
-        1. Wenn der Furkaverlad geschlossen ist, erwähne das SOFORT als Grund, warum man über den Lötschberg muss.
-        2. Vergleiche die Wartezeiten. Wenn man an einem Verlad lange steht, gib einen Tipp (z.B. "genug Zeit für einen Kaffee").
-        3. Nenne die konkrete Uhrzeit der nächsten empfohlenen Zugabfahrt.
-        4. Schreib im herzlichen, aber informierten Stil eines Einheimischen. Max. 4 Sätze. Emojis: ❄️, 🚂, ☕.
+        1. TOTALAUSFALL: Wenn BEIDE Verladestationen gesperrt sind, rate dem User DRINGEND, zu Hause zu bleiben. 
+           Empfiehl eine lustige Indoor-Aktivität (z.B. Käsefondue im Wohnzimmer, "Trocken-Skifahren" auf dem Teppich oder Walliser Weisswein-Degustation im Pyjama).
+        2. NUR EINER OFFEN: Erkläre kurz, dass dies aktuell die einzige Verbindung ins Wallis ist.
+        3. BEIDE OFFEN: Vergleiche Wartezeiten und Abfahrten, empfiehl die effizienteste Route.
+        4. TONFALL: Herzlich, "urchig" schweizerisch, max. 4 Sätze. Nutze Emojis: ❄️, 🧀, 🍷, 🚂.
         """
 
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
-        return f"🤖 Der Winter-Experte hat gerade Verbindungsprobleme... ({e})"
+        return f"🤖 Der Winter-Guide hat gerade kalte Füsse bekommen... (Fehler: {e})"
