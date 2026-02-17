@@ -6,14 +6,14 @@ from logic import (
     get_furka_departure, 
     get_loetschberg_departure,
     get_furka_status,
-    get_loetschberg_status,
-    get_gemini_winter_report  # Neu importiert
+    get_loetschberg_status,  # Neu importiert
+    get_gemini_winter_report
 )
 
-# 1. Seiteneinstellungen umbenannt
+# 1. Seiteneinstellungen
 st.set_page_config(page_title="Routen-Check Wallis | Winter", layout="wide")
 
-# 2. Titel angepasst
+# 2. Titel
 st.title("❄️ Entscheidungshilfe Winter: Deine Reise nach Ried-Mörel")
 st.info("Diese Ansicht berücksichtigt die Autoverlade Furka & Lötschberg.")
 
@@ -25,6 +25,7 @@ if st.button("Route jetzt berechnen"):
         
         # --- DATENABFRAGE & STATUS ---
         furka_aktiv = get_furka_status()
+        loetschberg_aktiv = get_loetschberg_status() # Neu: Status Lötschberg prüfen
         
         # --- ROUTE A: FURKA (REALP) ---
         anfahrt_f = get_google_maps_duration(start, "Autoverlad Realp")
@@ -47,18 +48,22 @@ if st.button("Route jetzt berechnen"):
 
         # --- ROUTE B: LÖTSCHBERG (KANDERSTEG) ---
         anfahrt_l = get_google_maps_duration(start, "Autoverlad Kandersteg")
-        ankunft_kandersteg = jetzt + datetime.timedelta(minutes=anfahrt_l)
-        naechster_zug_l = get_loetschberg_departure(ankunft_kandersteg)
-        if naechster_zug_l:
-            wartezeit_fahrplan_l = int((naechster_zug_l - ankunft_kandersteg).total_seconds() / 60)
-            stau_l = get_latest_wait_times("Kandersteg")
-            effektive_warte_l = max(wartezeit_fahrplan_l, stau_l)
-            zug_l_dauer = 20
-            ziel_l = get_google_maps_duration("Goppenstein", "Ried-Mörel")
-            total_l = anfahrt_l + effektive_warte_l + zug_l_dauer + ziel_l
-            ankunft_ziel_l = jetzt + datetime.timedelta(minutes=total_l)
+        if loetschberg_aktiv: # Neu: Nur berechnen wenn aktiv
+            ankunft_kandersteg = jetzt + datetime.timedelta(minutes=anfahrt_l)
+            naechster_zug_l = get_loetschberg_departure(ankunft_kandersteg)
+            if naechster_zug_l:
+                wartezeit_fahrplan_l = int((naechster_zug_l - ankunft_kandersteg).total_seconds() / 60)
+                stau_l = get_latest_wait_times("Kandersteg")
+                effektive_warte_l = max(wartezeit_fahrplan_l, stau_l)
+                zug_l_dauer = 20
+                ziel_l = get_google_maps_duration("Goppenstein", "Ried-Mörel")
+                total_l = anfahrt_l + effektive_warte_l + zug_l_dauer + ziel_l
+                ankunft_ziel_l = jetzt + datetime.timedelta(minutes=total_l)
+            else:
+                total_l = 9999
         else:
-            total_l = 9999
+            total_l = 999999
+            naechster_zug_l = None
 
     # --- UI DARSTELLUNG ---
     col_f, col_l = st.columns(2)
@@ -73,75 +78,71 @@ if st.button("Route jetzt berechnen"):
         elif naechster_zug_f:
             ist_morgen_f = naechster_zug_f.date() > jetzt.date()
             label_f = "Ankunft (MORGEN)" if ist_morgen_f else "Ankunft Ried-Mörel"
-            
             st.metric(label_f, ankunft_ziel_f.strftime('%H:%M'), f"{total_f} Min Gesamt")
-            
             st.write(f"🏠 **Start:** {start}")
             st.write(f"⬇️ Fahrt bis Autoverlad Realp: **{anfahrt_f} Min**")
-            st.write(f"🏎️ **Ankunft Autoverlad Realp:** {ankunft_realp.strftime('%H:%M')}")
-            
             if ist_morgen_f:
                 st.warning(f"⏳ **Nachtpause:** {effektive_warte_f // 60}h {effektive_warte_f % 60}min")
             else:
                 st.warning(f"⏳ **Wartezeit:** {effektive_warte_f} Min")
-                
-            tag_f = " (Morgen)" if ist_morgen_f else ""
-            st.write(f"🚂 **Abfahrt Realp:** {naechster_zug_f.strftime('%H:%M')}{tag_f}")
-            st.write(f"🚂 **Zugfahrt:** {zug_f_dauer} Min")
-            st.write(f"⬇️ Restliche Fahrt: **{ziel_f} Min**")
-            st.success(f"🏁 **Ziel Ried-Mörel:** {ankunft_ziel_f.strftime('%H:%M')}{tag_f}")
+            st.write(f"🚂 **Abfahrt Realp:** {naechster_zug_f.strftime('%H:%M')}")
+            st.success(f"🏁 **Ziel Ried-Mörel:** {ankunft_ziel_f.strftime('%H:%M')}")
         else:
             st.error("Kein Fahrplan verfügbar.")
 
     # --- SPALTE LÖTSCHBERG ---
     with col_l:
         st.subheader("🚆 Via Lötschberg (Kandersteg)")
-        if naechster_zug_l:
+        if not loetschberg_aktiv: # Neu: Error-Anzeige für Lötschberg
+            st.error("🚨 **BETRIEB EINGESTELLT**")
+            st.info("Die BLS meldet aktuell eine Störung am Autoverlad Lötschberg.")
+            st.write(f"🏎️ Anfahrt bis Autoverlad Kandersteg: **{anfahrt_l} Min**")
+        elif naechster_zug_l:
             ist_morgen_l = naechster_zug_l.date() > jetzt.date()
             label_l = "Ankunft (MORGEN)" if ist_morgen_l else "Ankunft Ried-Mörel"
-            
             st.metric(label_l, ankunft_ziel_l.strftime('%H:%M'), f"{total_l} Min Gesamt")
-            
             st.write(f"🏠 **Start:** {start}")
             st.write(f"⬇️ Fahrt bis Autoverlad Kandersteg: **{anfahrt_l} Min**")
-            st.write(f"🏎️ **Ankunft Autoverlad Kandersteg:** {ankunft_kandersteg.strftime('%H:%M')}")
-            
             if ist_morgen_l:
                 st.warning(f"⏳ **Nachtpause:** {effektive_warte_l // 60}h {effektive_warte_l % 60}min")
             else:
                 st.warning(f"⏳ **Wartezeit:** {effektive_warte_l} Min")
-                
-            tag_l = " (Morgen)" if ist_morgen_l else ""
-            st.write(f"🚂 **Abfahrt Kandersteg:** {naechster_zug_l.strftime('%H:%M')}{tag_l}")
-            st.write(f"🚂 **Zugfahrt:** {zug_l_dauer} Min")
-            st.write(f"⬇️ Restliche Fahrt: **{ziel_l} Min**")
-            st.success(f"🏁 **Ziel Ried-Mörel:** {ankunft_ziel_l.strftime('%H:%M')}{tag_l}")
+            st.write(f"🚂 **Abfahrt Kandersteg:** {naechster_zug_l.strftime('%H:%M')}")
+            st.success(f"🏁 **Ziel Ried-Mörel:** {ankunft_ziel_l.strftime('%H:%M')}")
 
-   # --- GEMINI WINTER AI REPORT ---
+    # --- GEMINI WINTER AI REPORT ---
     st.divider()
     st.subheader("🤖 Der Gemini Experten-Check")
     
-    # Hier packen wir jetzt ALLES rein, was wir oben berechnet haben
     winter_daten_komplett = {
         "start": start,
         "furka_aktiv": furka_aktiv,
-        "total_f": total_f if 'total_f' in locals() else None,
-        "total_l": total_l,
+        "loetschberg_aktiv": loetschberg_aktiv, # Neu für Gemini
+        "total_f": total_f if 'total_f' in locals() else 999999,
+        "total_l": total_l if 'total_l' in locals() else 999999,
         "warte_f": effektive_warte_f if 'effektive_warte_f' in locals() else 0,
-        "warte_l": effektive_warte_l,
-        "abfahrt_f": naechster_zug_f.strftime('%H:%M') if naechster_zug_f else "Keine",
-        "abfahrt_l": naechster_zug_l.strftime('%H:%M') if naechster_zug_l else "Keine"
+        "warte_l": effektive_warte_l if 'effektive_warte_l' in locals() else 0,
+        "abfahrt_f": naechster_zug_f.strftime('%H:%M') if (furka_aktiv and naechster_zug_f) else "Keine",
+        "abfahrt_l": naechster_zug_l.strftime('%H:%M') if (loetschberg_aktiv and naechster_zug_l) else "Keine"
     }
 
     with st.spinner("Gemini analysiert Fahrpläne und Status..."):
         ai_bericht = get_gemini_winter_report(winter_daten_komplett)
-        st.info(ai_bericht, icon="❄️")
+        # Wenn alles zu ist, Box rot färben
+        if not furka_aktiv and not loetschberg_aktiv:
+            st.error(ai_bericht, icon="🏠")
+        else:
+            st.info(ai_bericht, icon="❄️")
 
     # --- FAZIT ---
     st.divider()
-    if not furka_aktiv:
+    if not furka_aktiv and not loetschberg_aktiv:
+        st.error("⚠️ **Totalunterbruch:** Aktuell sind beide Autoverlade gesperrt. Eine Anreise ist kaum möglich.")
+    elif not furka_aktiv:
         st.warning("👉 **Empfehlung:** Da der Furka aktuell geschlossen ist, bleibt nur die Route über den Lötschberg.")
+    elif not loetschberg_aktiv:
+        st.warning("👉 **Empfehlung:** Da der Lötschberg aktuell geschlossen ist, bleibt nur die Route über den Furka.")
     elif total_f < total_l:
-        st.success(f"✅ **Empfehlung:** Über den **Furka** sparst du ca. {total_l - total_f} Minuten.")
+        st.success(f"✅ **Mathematische Empfehlung:** Über den **Furka** sparst du ca. {total_l - total_f} Minuten.")
     else:
-        st.success(f"✅ **Empfehlung:** Über den **Lötschberg** sparst du ca. {total_f - total_l} Minuten.")
+        st.success(f"✅ **Mathematische Empfehlung:** Über den **Lötschberg** sparst du ca. {total_f - total_l} Minuten.")
