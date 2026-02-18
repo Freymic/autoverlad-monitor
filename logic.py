@@ -353,53 +353,115 @@ def get_loetschberg_departure(arrival_time):
         
     return zug
 
+import requests
+import google.generativeai as genai
+
 def get_furka_status():
     """
-    Prüft den RSS-Feed auf Sperrungen.
+    Prüft den Furka RSS-Feed und nutzt Gemini zur intelligenten Interpretation.
     Gibt True zurück, wenn offen, und False, wenn eingestellt.
     """
-    # Hier kommt dein RSS-Parsing Code hin (z.B. mit feedparser)
-    # Beispiel-Logik:
-    feed_text = "Der Autoverlad Furka ist zur Zeit eingestellt" # Das käme vom Feed
+    url = "https://mgb-prod.oevfahrplan.ch/incident-manager-api/incidentmanager/rss?publicId=av_furka&lang=de"
     
-    status_keywords = ["eingestellt", "geschlossen", "unterbrochen", "Sperrung"]
-    
-    for word in status_keywords:
-        if word.lower() in feed_text.lower():
-            return False # Betrieb eingestellt
+    try:
+        response = requests.get(url, timeout=10)
+        if response.status_code != 200:
+            return True # Im Zweifelsfall offen
             
-    return True # Betrieb scheint okay
+        feed_text = response.text
+        
+        # Keywords, die auf ein Problem hindeuten könnten
+        status_keywords = ["eingestellt", "geschlossen", "unterbrochen", "sperrung", "unterbruch"]
+        
+        # Nur wenn ein Keyword gefunden wird, fragen wir die KI
+        if any(word in feed_text.lower() for word in status_keywords):
+            return check_furka_with_ai(feed_text)
+            
+        return True # Keine Keywords gefunden -> Offen
+    except Exception as e:
+        print(f"Fehler Furka-Status: {e}")
+        return True
+
+def check_furka_with_ai(rss_inhalt):
+    """
+    KI-Filter speziell für den Furka-Autoverlad (Realp-Oberwald).
+    Unterscheidet zwischen allgemeinem Bahnverkehr und dem Autozug.
+    """
+    try:
+        # Falls genai noch nicht konfiguriert ist (Sicherheitshalber)
+        # genai.configure(api_key=st.secrets["GEMINI_API_KEY"]) 
+        
+        try:
+            model = genai.GenerativeModel('gemini-1.5-flash')
+        except:
+            model = genai.GenerativeModel('gemini-pro')
+        
+        prompt = f"""
+        Analysiere diesen RSS-Feed der Matterhorn Gotthard Bahn: "{rss_inhalt}"
+        
+        FRAGE: Ist der AUTOVERLAD (Autozüge) am Furka zwischen Realp und Oberwald aktuell eingestellt oder gesperrt?
+        HINWEIS: Meldungen über den Glacier Express, den Regionalverkehr oder andere Linien (z.B. Visp-Zermatt) 
+        bedeuten NICHT, dass der Autoverlad am Furka zu ist.
+        
+        Antworte NUR mit 'GESPERRT' oder 'OFFEN'.
+        """
+        
+        response = model.generate_content(prompt)
+        ergebnis = response.text.strip().upper()
+        
+        # Wir geben False zurück, wenn die KI "GESPERRT" sagt
+        return False if "GESPERRT" in ergebnis else True
+    except Exception as e:
+        print(f"Gemini Furka Check Error: {e}")
+        return True # Im Zweifel offen lassen
 
 def get_loetschberg_status():
     url = "https://www.bls.ch/api/TrafficInformation/GetNewNotifications?sc_lang=de&sc_site=internet-bls"
-    # Ein User-Agent signalisiert der Webseite, dass ein Browser anfragt
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15'
-    }
+    headers = {'User-Agent': 'Mozilla/5.0'}
     
     try:
         response = requests.get(url, headers=headers, timeout=10)
-        if response.status_code == 200:
-            # Falls die API doch mal leeren Text schickt, fangen wir das ab
-            if not response.text.strip():
-                return True
-                
-            data = response.json()
-            notifications = data.get("trafficInformations", [])
+        data = response.json()
+        notifications = data.get("trafficInformations", [])
+        
+        if not notifications:
+            return True # Alles offen
             
-            alarm_keywords = ["unterbrochen", "eingestellt", "sperrung", "unterbruch", "keine verlademöglichkeit"]
+        # Wir sammeln alle Titel der Meldungen
+        alle_meldungen = [n.get("title", "") for n in notifications]
+        kombinierter_text = " | ".join(alle_meldungen)
+        
+        # Nur wenn kritische Begriffe auftauchen, fragen wir die KI
+        if any(x in kombinierter_text.lower() for x in ["unterbrochen", "eingestellt", "sperrung", "unterbruch"]):
+            return check_status_with_ai(kombinierter_text)
             
-            for note in notifications:
-                text = note.get("title", "").lower()
-                # Check auf Autoverlad Bezug
-                if any(x in text for x in ["kandersteg", "goppenstein", "autoverlad"]):
-                    if any(word in text for word in alarm_keywords):
-                        if "aufgehoben" not in text:
-                            return False # Unterbruch bestätigt
         return True
-    except Exception as e:
-        print(f"BLS Error: {e}")
+    except:
         return True
+
+def check_status_with_ai(meldungs_text):
+    """
+    Nutzt Gemini, um zu entscheiden, ob der AUTOVERLAD wirklich gesperrt ist.
+    """
+    try:
+        import google.generativeai as genai
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        prompt = f"""
+        Analysiere diese Verkehrsmeldungen der BLS: "{meldungs_text}"
+        
+        FRAGE: Ist der AUTOVERLAD (Autozüge) zwischen Kandersteg und Goppenstein aktuell GESPERRT?
+        HINWEIS: Ein Unterbruch des BAHNVERKEHRS (Personenzüge) bedeutet NICHT zwingend, dass der Autoverlad zu ist.
+        
+        Antworte NUR mit 'GESPERRT' oder 'OFFEN'.
+        """
+        
+        response = model.generate_content(prompt)
+        ergebnis = response.text.strip().upper()
+        
+        return False if "GESPERRT" in ergebnis else True
+    except:
+        return True # Im Zweifel offen zeigen
 
 def get_pass_status():
     """

@@ -96,18 +96,59 @@ if not df.empty:
 else:
     st.info("Noch keine Daten vorhanden.")
 
-# --- 4. DEBUG BEREICH ---
+# --- 4. DEBUG BEREICH (ERWEITERT) ---
 st.markdown("---")
-with st.expander("🛠️ Debug Informationen"):
+with st.expander("🛠️ Debug Informationen & Experten-Diagnose"):
+    # 1. Schnelle Status-Übersicht
     col_stat1, col_stat2 = st.columns(2)
     col_stat1.write(f"Furka-Status (RSS): **{'✅ Aktiv' if furka_aktiv else '❌ Eingestellt'}**")
     col_stat2.write(f"Lötschberg-Status (API): **{'✅ Aktiv' if loetschberg_aktiv else '❌ Eingestellt'}**")
     
-    tab1, tab2 = st.tabs(["JSON Rohdaten", "Datenbank Historie"])
+    # 2. Detaillierte Analyse-Tabs
+    tab1, tab2, tab3 = st.tabs(["JSON Rohdaten", "Datenbank Historie", "Experten-Diagnose (Live)"])
+    
     with tab1:
+        st.write("Aktuelle Wartezeit-Daten (fetch_all_data):")
         st.json(data)
+    
     with tab2:
+        st.write("Letzte 100 Einträge aus der SQLite DB:")
         st.dataframe(df_history, use_container_width=True)
+        
+    with tab3:
+        st.write("### Live-Abfrage der Verkehrs-Feeds")
+        diag_col1, diag_col2 = st.columns(2)
+        
+        with diag_col1:
+            st.markdown("**Furka (MGB RSS)**")
+            try:
+                import requests
+                f_res = requests.get("https://mgb-prod.oevfahrplan.ch/incident-manager-api/incidentmanager/rss?publicId=av_furka&lang=de", timeout=5)
+                # Wir suchen im Text nach Sperr-Begriffen für die Anzeige im Debugger
+                if "eingestellt" in f_res.text.lower() or "unterbrochen" in f_res.text.lower():
+                    st.warning("Sperr-Keywords im Furka-Feed gefunden.")
+                else:
+                    st.success("Keine Sperr-Keywords im Furka-Feed.")
+                st.text_area("Roh-Text Furka (Auszug):", f_res.text[:500], height=150)
+            except Exception as e:
+                st.error(f"Fehler Furka-Feed: {e}")
+
+        with diag_col2:
+            st.markdown("**Lötschberg (BLS API)**")
+            try:
+                import requests
+                l_res = requests.get("https://www.bls.ch/api/TrafficInformation/GetNewNotifications?sc_lang=de&sc_site=internet-bls", 
+                                     headers={'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)'}, timeout=5)
+                bls_data = l_res.json()
+                notifications = bls_data.get("trafficInformations", [])
+                
+                if not notifications:
+                    st.success("Die BLS-Meldungsliste ist leer (Normalbetrieb).")
+                else:
+                    st.info(f"{len(notifications)} Meldung(en) gefunden.")
+                    st.json(notifications)
+            except Exception as e:
+                st.error(f"Fehler BLS-API: {e}")
 
 # --- 5. STATUS & CLOUD-INFO ---
 try:
