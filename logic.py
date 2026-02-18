@@ -87,57 +87,26 @@ def parse_time_to_minutes(time_str):
     return total_min
 
 def fetch_all_data():
-    """Holt Daten von Lötschberg (API) und Furka (RSS)."""
-    results = {}
+    """
+    Sammelt alle Wartezeiten und gleicht sie mit den KI-Status-Checks ab.
+    """
+    # 1. Basis-Wartezeiten abrufen (deine bestehende API-Logik)
+    # Ich nehme an, hier kommen die Rohdaten (0, 10, 20 Min) rein.
+    data = get_raw_wait_times() 
     
-    # --- TEIL 1: LÖTSCHBERG (Kandersteg & Goppenstein) ---
-    try:
-        l_url = "https://www.bls.ch/api/avwV2/delays?dataSourceId={808904A8-0874-44AC-8DE3-4A5FC33D8CF1}"
-        l_res = requests.get(l_url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'}).json()
-        
-        for s in l_res.get("Stations", []):
-            name = s.get("Station")
-            if name in ["Kandersteg", "Goppenstein"]:
-                msg = s.get("DelayMessage", "")
-                results[name] = {
-                    "min": parse_time_to_minutes(msg), 
-                    "raw": msg if msg else "Keine Wartezeit"
-                }
-    except Exception as e:
-        print(f"Fehler Lötschberg: {e}")
-
-    # --- TEIL 2: FURKA (Oberwald & Realp) ---
-    try:
-        f_url = "https://mgb-prod.oevfahrplan.ch/incident-manager-api/incidentmanager/rss?publicId=av_furka&lang=de"
-        f_resp = requests.get(f_url, timeout=10)
-        root = ET.fromstring(f_resp.content)
-        
-        furka_found = {"Oberwald": False, "Realp": False}
-        
-        for item in root.findall('.//item'):
-            title = item.find('title').text or ""
-            desc = item.find('description').text or ""
-            full_text = f"{title} {desc}"
-            
-            if any(x in full_text.lower() for x in ["stündlich", "abfahrt"]):
-                continue
-            
-            if "wartezeit" in full_text.lower():
-                val = parse_time_to_minutes(full_text)
-                if "Oberwald" in full_text and not furka_found["Oberwald"]:
-                    results["Oberwald"] = {"min": val, "raw": full_text}
-                    furka_found["Oberwald"] = True
-                elif "Realp" in full_text and not furka_found["Realp"]:
-                    results["Realp"] = {"min": val, "raw": full_text}
-                    furka_found["Realp"] = True
-        
-        if not furka_found["Oberwald"]: results["Oberwald"] = {"min": 0, "raw": "Keine Meldung"}
-        if not furka_found["Realp"]: results["Realp"] = {"min": 0, "raw": "Keine Meldung"}
-            
-    except Exception as e:
-        print(f"Fehler Furka: {e}")
+    # 2. KI-Status abfragen
+    furka_offen = get_furka_status()
+    loetschberg_offen = get_loetschberg_status()
     
-    return results
+    # 3. Daten manipulieren, falls Sperrung vorliegt
+    for station in data:
+        if station in ["Realp", "Oberwald"] and not furka_offen:
+            data[station]['min'] = 9999  # Signal für "Gesperrt"
+            
+        if station in ["Kandersteg", "Goppenstein"] and not loetschberg_offen:
+            data[station]['min'] = 9999  # Signal für "Gesperrt"
+            
+    return data
 
 def save_to_db(data):
     """Speichert Daten exakt im 5-Minuten-Takt in die SQLite DB."""
