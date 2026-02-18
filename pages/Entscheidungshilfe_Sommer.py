@@ -1,159 +1,71 @@
 import streamlit as st
 import datetime
 from logic import (
-    get_latest_wait_times, 
+    fetch_all_data, # Nutzt den Cache!
     get_google_maps_duration, 
     get_furka_departure, 
     get_loetschberg_departure,
-    get_furka_status,
-    get_loetschberg_status, # Neu importiert
     get_pass_status,
     get_gemini_summer_report
 )
 
-# 1. Seiteneinstellungen
-st.set_page_config(page_title="Routen-Check Wallis | Sommer", layout="wide")
+st.set_page_config(page_title="Routen-Check Wallis | Sommer", layout="wide", page_icon="☀️")
 
-# 2. Titel
-st.title("☀️ Entscheidungshilfe Sommer: Deine Reise nach Ried-Mörel")
-st.info("Vergleich zwischen Passstrassen und Autoverlad (inkl. aktueller Verkehrslage).")
+st.title("☀️ Entscheidungshilfe Sommer")
+st.info("Vergleich zwischen Passstrassen und Autoverlad (inkl. KI-Verkehrsanalyse).")
 
 start = st.text_input("Startpunkt:", value="Buchrain")
 
 if st.button("Sommer-Route berechnen"):
-    with st.spinner("Frage Pässe, Verkehr und Verlade ab..."):
+    with st.spinner("Synchronisiere Pässe, Verkehr und Verlade..."):
         jetzt = datetime.datetime.now()
         
-        # --- 0. STATUS CHECK PÄSSE ---
+        # --- 1. ZENTRALER DATEN-SNAPSHOT ---
+        payload = fetch_all_data()
+        wait_times = payload["wait_times"]
+        active_status = payload["active_status"]
         pass_status = get_pass_status()
-        
-        # --- 1. PASS-ROUTEN (DIREKT) ---
-        if pass_status.get("Furkapass", False):
-            zeit_furkapass = get_google_maps_duration(start, "Ried-Mörel", waypoints=["Furkapass"])
-        else:
-            zeit_furkapass = 9999
 
-        if pass_status.get("Grimselpass", False) and pass_status.get("Brünigpass", True):
-            zeit_grimsel = get_google_maps_duration(start, "Ried-Mörel", waypoints=["Brünigpass", "Grimselpass"])
-        else:
-            zeit_grimsel = 9999
+        # --- 2. PASS-ROUTEN ---
+        # Wir berechnen Google Maps nur, wenn der Pass auch offen ist
+        zeit_furka_p = get_google_maps_duration(start, "Ried-Mörel", ["Furkapass"]) if pass_status.get("Furkapass") else 9999
+        zeit_grimsel_p = get_google_maps_duration(start, "Ried-Mörel", ["Brünigpass", "Grimselpass"]) if pass_status.get("Grimselpass") else 9999
+        zeit_nufenen_p = get_google_maps_duration(start, "Ried-Mörel", ["Airolo", "Nufenenpass"]) if pass_status.get("Nufenenpass") else 9999
 
-        if pass_status.get("Nufenenpass", False):
-            zeit_nufenen = get_google_maps_duration(start, "Ried-Mörel", waypoints=["Airolo", "Nufenenpass"])
-        else:
-            zeit_nufenen = 9999
+        # --- 3. VERLAD-ROUTEN (LOGIK-REFACTORING) ---
+        def calc_verlad(provider, start_node, end_node, station_name, zug_dauer):
+            if not active_status.get(provider): return 999999, 0
+            
+            anfahrt = get_google_maps_duration(start, start_node)
+            ankunft_st = jetzt + datetime.timedelta(minutes=anfahrt)
+            
+            # Fahrplan-Check
+            dep_func = get_furka_departure if provider == "furka" else get_loetschberg_departure
+            next_zug = dep_func(ankunft_st)
+            
+            if not next_zug: return 9999, 0
+            
+            warte_fp = int((next_zug - ankunft_st).total_seconds() / 60)
+            warte_real = wait_times.get(station_name, {}).get("min", 0)
+            effektive_warte = max(warte_fp, warte_real)
+            
+            total = anfahrt + effektive_warte + zug_dauer + get_google_maps_duration(end_node, "Ried-Mörel")
+            return total, effektive_warte
 
-        # --- 2. AUTOVERLAD-ROUTEN ---
-        furka_verlad_aktiv = get_furka_status()
-        loetschberg_verlad_aktiv = get_loetschberg_status() # Neu: Status Lötschberg prüfen
-        
-        # Furka Verlad Berechnung
-        anfahrt_f = get_google_maps_duration(start, "Autoverlad Realp")
-        if furka_verlad_aktiv:
-            ankunft_realp = jetzt + datetime.timedelta(minutes=anfahrt_f)
-            naechster_zug_f = get_furka_departure(ankunft_realp)
-            if naechster_zug_f:
-                warte_min = int((naechster_zug_f - ankunft_realp).total_seconds() / 60)
-                effektive_warte_f = max(warte_min, get_latest_wait_times("Realp"))
-                total_f_verlad = anfahrt_f + effektive_warte_f + 25 + get_google_maps_duration("Oberwald", "Ried-Mörel")
-            else: 
-                total_f_verlad = 9999
-        else: 
-            total_f_verlad = 999999
+        total_f_verlad, warte_f = calc_verlad("furka", "Autoverlad Realp", "Oberwald", "Realp", 25)
+        total_l_verlad, warte_l = calc_verlad("loetschberg", "Autoverlad Kandersteg", "Goppenstein", "Kandersteg", 20)
 
-        # Lötschberg Verlad Berechnung
-        anfahrt_l = get_google_maps_duration(start, "Autoverlad Kandersteg")
-        if loetschberg_verlad_aktiv: # Neu: Prüfung eingebaut
-            ankunft_kandersteg = jetzt + datetime.timedelta(minutes=anfahrt_l)
-            naechster_zug_l = get_loetschberg_departure(ankunft_kandersteg)
-            if naechster_zug_l:
-                warte_min_l = int((naechster_zug_l - ankunft_kandersteg).total_seconds() / 60)
-                effektive_warte_l = max(warte_min_l, get_latest_wait_times("Kandersteg"))
-                total_l_verlad = anfahrt_l + effektive_warte_l + 20 + get_google_maps_duration("Goppenstein", "Ried-Mörel")
-            else: 
-                total_l_verlad = 9999
-        else:
-            total_l_verlad = 999999
+    # --- UI DARSTELLUNG (Kompakt) ---
+    st.subheader("⛰️ Pässe vs. 🚂 Verlad")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Via Furkapass", f"{zeit_furka_p} Min" if zeit_furka_p < 9000 else "GESPERRT")
+    c2.metric("Autoverlad Furka", f"{total_f_verlad} Min" if total_f_verlad < 9000 else "ZU")
+    c3.metric("Autoverlad Lötschberg", f"{total_l_verlad} Min" if total_l_verlad < 9000 else "ZU")
 
-    # --- UI DARSTELLUNG PÄSSE ---
-    st.subheader("⛰️ Über die Passstrassen")
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        if pass_status.get("Furkapass", False):
-            st.metric("Via Furkapass", f"{zeit_furkapass} Min")
-            st.write("✅ Pass offen")
-        else:
-            st.metric("Via Furkapass", "GESPERRT", "Wintersperre", delta_color="inverse")
-            st.write("❌ Pass geschlossen")
-    
-    with col2:
-        if pass_status.get("Grimselpass", False):
-            st.metric("Via Grimselpass", f"{zeit_grimsel} Min")
-            st.write("✅ Pass offen (via Brünig)")
-        else:
-            st.metric("Via Grimselpass", "GESPERRT", "Wintersperre", delta_color="inverse")
-            st.write("❌ Pass geschlossen")
-        
-    with col3:
-        if pass_status.get("Nufenenpass", False):
-            st.metric("Via Nufenenpass", f"{zeit_nufenen} Min")
-            st.write("✅ Pass offen (via Gotthard)")
-        else:
-            st.metric("Via Nufenenpass", "GESPERRT", "Wintersperre", delta_color="inverse")
-            st.write("❌ Pass geschlossen")
-
+    # --- KI REPORT ---
     st.divider()
-
-    # --- UI DARSTELLUNG VERLAD ---
-    st.subheader("🚂 Via Autoverlad")
-    col_f, col_l = st.columns(2)
-
-    with col_f:
-        if not furka_verlad_aktiv:
-            st.error("🚨 Autoverlad Furka eingestellt")
-        elif total_f_verlad >= 9999:
-             st.error("Kein Zug mehr heute")
-        else:
-            delta_msg = None
-            if pass_status.get("Furkapass", False):
-                diff = total_f_verlad - zeit_furkapass
-                delta_msg = f"{diff} Min vs. Pass"
-            st.metric("Autoverlad Furka", f"{total_f_verlad} Min", delta=delta_msg, delta_color="inverse")
-            st.write(f"⏳ Wartezeit Realp: {effektive_warte_f} Min")
-
-    with col_l:
-        if not loetschberg_verlad_aktiv: # Neu: Rote Warnung für Lötschberg
-            st.error("🚨 Autoverlad Lötschberg eingestellt")
-        elif total_l_verlad >= 9999:
-            st.error("Kein Zug mehr heute")
-        else:
-            st.metric("Autoverlad Lötschberg", f"{total_l_verlad} Min")
-            st.write(f"⏳ Wartezeit Kandersteg: {effektive_warte_l} Min")
-
-    # --- GEMINI SUMMER AI REPORT ---
-    st.divider()
-    st.subheader("🤖 Der Gemini Sommer-Check")
-    
     alle_routen = {
-        "den Furkapass": zeit_furkapass,
-        "den Grimselpass": zeit_grimsel,
-        "den Nufenenpass": zeit_nufenen,
-        "den Autoverlad Furka": total_f_verlad,
-        "den Autoverlad Lötschberg": total_l_verlad
+        "den Furkapass": zeit_furka_p, "den Grimselpass": zeit_grimsel_p, "den Nufenenpass": zeit_nufenen_p,
+        "den Autoverlad Furka": total_f_verlad, "den Autoverlad Lötschberg": total_l_verlad
     }
-
-    with st.spinner("Gemini analysiert die schönste Passroute für dich..."):
-        # Wir übergeben hier auch den Status der Verlade im Dictionary für Gemini, falls du den Prompt anpassen willst
-        ai_bericht = get_gemini_summer_report(alle_routen, pass_status)
-        st.info(ai_bericht, icon="☀️")
-
-    # --- FAZIT SOMMER ---
-    machbare_routen = {k: v for k, v in alle_routen.items() if v < 9000}
-    
-    if machbare_routen:
-        beste_route = min(machbare_routen, key=machbare_routen.get)
-        schnellste_zeit = machbare_routen[beste_route]
-        st.success(f"✅ **Mathematische Empfehlung:** Nimm **{beste_route}** ({schnellste_zeit} Min).")
-    else:
-        st.error("⚠️ Aktuell scheinen alle Routen gesperrt zu sein.")
+    st.info(get_gemini_summer_report(alle_routen, pass_status))
