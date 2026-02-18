@@ -372,31 +372,31 @@ def get_furka_status():
 
 def get_loetschberg_status():
     url = "https://www.bls.ch/api/TrafficInformation/GetNewNotifications?sc_lang=de&sc_site=internet-bls"
-    # Ein User-Agent signalisiert der Webseite, dass ein Browser anfragt
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15'
-    }
+    headers = {'User-Agent': 'Mozilla/5.0'}
     
     try:
         response = requests.get(url, headers=headers, timeout=10)
         if response.status_code == 200:
-            # Falls die API doch mal leeren Text schickt, fangen wir das ab
-            if not response.text.strip():
-                return True
-                
             data = response.json()
             notifications = data.get("trafficInformations", [])
+            
+            # WICHTIG: Wenn die Liste leer ist (wie in deinem Screenshot), 
+            # gibt es keine Sperrung -> Sofort True zurückgeben!
+            if not notifications:
+                return True
             
             alarm_keywords = ["unterbrochen", "eingestellt", "sperrung", "unterbruch", "keine verlademöglichkeit"]
             
             for note in notifications:
                 text = note.get("title", "").lower()
-                # Check auf Autoverlad Bezug
                 if any(x in text for x in ["kandersteg", "goppenstein", "autoverlad"]):
+                    # Wir suchen nach Alarm-Wörtern
                     if any(word in text for word in alarm_keywords):
+                        # Nur sperren, wenn NICHT "aufgehoben" drin steht
                         if "aufgehoben" not in text:
-                            return False # Unterbruch bestätigt
-        return True
+                            return False 
+                            
+        return True # Standard: Offen
     except Exception as e:
         print(f"BLS Error: {e}")
         return True
