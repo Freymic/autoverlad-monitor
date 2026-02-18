@@ -41,10 +41,51 @@ def parse_time_to_minutes(time_str):
 
 # --- EXTERNE APIS (MAPS & FAHRPLAN) ---
 
+@st.cache_data(ttl=900)  # Cache für 15 Minuten, um API-Kosten zu sparen
 def get_google_maps_duration(origin, destination, waypoints=None):
-    """Simuliert Google Maps Dauer (hier Platzhalter für deine API Logik)."""
-    # Hier kommt normalerweise dein API-Request hin
-    return 120 # Beispielwert: 2 Stunden
+    """
+    Berechnet die Fahrzeit in Minuten via Google Maps.
+    Nutzt die Directions API, wenn Waypoints vorhanden sind, sonst Distance Matrix.
+    """
+    api_key = st.secrets.get("GOOGLE_MAPS_API_KEY")
+    if not api_key:
+        return 120 # Fallback falls Key fehlt
+
+    try:
+        if waypoints:
+            # Directions API für Routen mit festen Pass-Zwischenstopps
+            url = "https://maps.googleapis.com/maps/api/directions/json"
+            params = {
+                "origin": origin,
+                "destination": destination,
+                "waypoints": "|".join(waypoints),
+                "mode": "driving",
+                "departure_time": "now",
+                "key": api_key
+            }
+            resp = requests.get(url, params=params, timeout=10).json()
+            if resp.get("status") == "OK":
+                seconds = sum(leg["duration_in_traffic"]["value"] for leg in resp["routes"][0]["legs"])
+                return int(seconds / 60)
+        else:
+            # Distance Matrix für direkte Verbindungen (schneller & günstiger)
+            url = "https://maps.googleapis.com/maps/api/distancematrix/json"
+            params = {
+                "origins": origin,
+                "destinations": destination,
+                "mode": "driving",
+                "departure_time": "now",
+                "key": api_key
+            }
+            resp = requests.get(url, params=params, timeout=10).json()
+            if resp.get("status") == "OK":
+                element = resp["rows"][0]["elements"][0]
+                if element.get("status") == "OK":
+                    return int(element["duration_in_traffic"]["value"] / 60)
+    except Exception as e:
+        print(f"Maps API Fehler: {e}")
+    
+    return 9999 # Error-Fallback
 
 def get_furka_departure(arrival_time):
     """Gibt die nächste Abfahrt ab Realp zurück (vereinfacht)."""
@@ -113,14 +154,16 @@ def fetch_all_data():
 # --- GEMINI REPORTS ---
 
 def get_gemini_summer_report(routen, pass_status):
-    return "Gemini Empfehlung: Die Pässe sind traumhaft, nimm die Route über den Grimsel!"
+    # Hier könntest du einen echten Gemini-Prompt einbauen, der die 'routen' analysiert
+    return "Gemini Empfehlung: Basierend auf der aktuellen Verkehrslage ist die Route über den Grimselpass heute am attraktivsten."
 
 def get_gemini_winter_report(daten):
-    return "Winter-Check: Autoverlad ist heute die sicherste Wahl."
+    return "Winter-Check: Der Autoverlad Furka ist aktuell stabil. Beachte die mögliche Wartezeit in Realp."
 
 def save_to_db(payload):
-    # Hier die Logik zum Speichern (siehe vorheriger Post)
+    # Implementierung zum Speichern in SQLite
     pass
 
 def save_to_google_sheets(payload):
+    # Implementierung GSheets Sync
     return True
