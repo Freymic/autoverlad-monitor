@@ -376,30 +376,47 @@ def get_loetschberg_status():
     
     try:
         response = requests.get(url, headers=headers, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            notifications = data.get("trafficInformations", [])
+        data = response.json()
+        notifications = data.get("trafficInformations", [])
+        
+        if not notifications:
+            return True # Alles offen
             
-            # WICHTIG: Wenn die Liste leer ist (wie in deinem Screenshot), 
-            # gibt es keine Sperrung -> Sofort True zurückgeben!
-            if not notifications:
-                return True
+        # Wir sammeln alle Titel der Meldungen
+        alle_meldungen = [n.get("title", "") for n in notifications]
+        kombinierter_text = " | ".join(alle_meldungen)
+        
+        # Nur wenn kritische Begriffe auftauchen, fragen wir die KI
+        if any(x in kombinierter_text.lower() for x in ["unterbrochen", "eingestellt", "sperrung", "unterbruch"]):
+            return check_status_with_ai(kombinierter_text)
             
-            alarm_keywords = ["unterbrochen", "eingestellt", "sperrung", "unterbruch", "keine verlademöglichkeit"]
-            
-            for note in notifications:
-                text = note.get("title", "").lower()
-                if any(x in text for x in ["kandersteg", "goppenstein", "autoverlad"]):
-                    # Wir suchen nach Alarm-Wörtern
-                    if any(word in text for word in alarm_keywords):
-                        # Nur sperren, wenn NICHT "aufgehoben" drin steht
-                        if "aufgehoben" not in text:
-                            return False 
-                            
-        return True # Standard: Offen
-    except Exception as e:
-        print(f"BLS Error: {e}")
         return True
+    except:
+        return True
+
+def check_status_with_ai(meldungs_text):
+    """
+    Nutzt Gemini, um zu entscheiden, ob der AUTOVERLAD wirklich gesperrt ist.
+    """
+    try:
+        import google.generativeai as genai
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        prompt = f"""
+        Analysiere diese Verkehrsmeldungen der BLS: "{meldungs_text}"
+        
+        FRAGE: Ist der AUTOVERLAD (Autozüge) zwischen Kandersteg und Goppenstein aktuell GESPERRT?
+        HINWEIS: Ein Unterbruch des BAHNVERKEHRS (Personenzüge) bedeutet NICHT zwingend, dass der Autoverlad zu ist.
+        
+        Antworte NUR mit 'GESPERRT' oder 'OFFEN'.
+        """
+        
+        response = model.generate_content(prompt)
+        ergebnis = response.text.strip().upper()
+        
+        return False if "GESPERRT" in ergebnis else True
+    except:
+        return True # Im Zweifel offen zeigen
 
 def get_pass_status():
     """
