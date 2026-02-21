@@ -581,57 +581,44 @@ def get_gemini_winter_report(winter_daten):
         return f"🤖 Der Winter-Guide hat gerade kalte Füsse bekommen... (Fehler: {e})"
 
 def get_gemini_situation_report(current_data, df_history):
-    """Generiert einen kompakten Lagebericht mit automatischem Modell-Wechsel (Failover)."""
-    import google.generativeai as genai
-    
+    """Generiert einen kompakten Lagebericht mit der bewährten dynamischen Modellsuche."""
     try:
+        import google.generativeai as genai
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         
-        # 1. MODELLE DEFINIEREN
-        # Wir probieren erst Flash (schnell), dann Pro, dann Exp.
-        models_to_try = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash-exp']
-        
-        # 2. TREND-DATEN VORBEREITEN
+        # --- DEINE BEWÄHRTE LOGIK ---
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        selected_model = next((n for n in available_models if 'gemini-1.5-flash' in n), available_models[0])
+        model = genai.GenerativeModel(selected_model)
+        # ----------------------------
+
+        # Trend-Daten vorbereiten
         trend_summary = ""
         if df_history is not None and not df_history.empty:
-            # Wir nehmen die neuesten Einträge für die Trend-Analyse
+            # Wir nehmen die letzten 20 Einträge für die Trend-Analyse
             latest_entries = df_history.head(20) 
             trend_summary = latest_entries[['timestamp', 'station', 'minutes']].to_string()
 
-        # 3. SCHLEIFE ÜBER MODELLE (Failover-Logik)
-        for model_name in models_to_try:
-            try:
-                model = genai.GenerativeModel(model_name)
-                
-                prompt = f"""
-                Du bist ein Experte für Verkehrsfluss beim Schweizer Autoverlad.
-                Analysiere die aktuelle Lage und den Trend der letzten Stunden:
-                
-                AKTUELL: {current_data}
-                HISTORIE/TREND: {trend_summary}
+        prompt = f"""
+        Du bist ein Experte für Verkehrsfluss beim Schweizer Autoverlad.
+        Analysiere die aktuelle Lage und den Trend der letzten Stunden:
+        
+        AKTUELL: {current_data}
+        HISTORIE/TREND: {trend_summary}
 
-                AUFGABE:
-                - Erstelle einen extrem kompakten Lagebericht (max. 6 Sätze).
-                - Erwähne, ob die Wartezeiten gerade steigen, fallen oder stabil sind.
-                - Gib eine kurze Empfehlung (z.B. "Geduld einpacken" oder "Freie Fahrt").
-                - Tonalität: Sachlich, hilfsbereit, leicht "schweizerisch" angehaucht.
-                - Nutze Emojis passend zur Lage (🚗, ⏳, ✅, ⚠️).
-                """
+        AUFGABE:
+        - Erstelle einen extrem kompakten Lagebericht (max. 6 Sätze).
+        - Erwähne, ob die Wartezeiten gerade steigen, fallen oder stabil sind.
+        - Gib eine kurze Empfehlung (z.B. "Geduld einpacken" oder "Freie Fahrt").
+        - Tonalität: Sachlich, hilfsbereit, leicht "schweizerisch" angehaucht.
+        - Nutze Emojis passend zur Lage (🚗, ⏳, ✅, ⚠️).
+        """
 
-                response = model.generate_content(prompt)
-                return response.text # Erfolg! Wir geben den Text zurück.
-
-            except Exception as e:
-                # Wenn ein Limit (429) oder Modellfehler (404) auftritt, probiere das nächste Modell
-                if "429" in str(e) or "404" in str(e):
-                    continue 
-                else:
-                    raise e # Andere Fehler (z.B. Key falsch) direkt melden
-
-        # Wenn die Schleife ohne Erfolg durchläuft
-        return "🤖 Alle KI-Modelle machen gerade ein Päuseli (Tageslimit erreicht). Die Live-Daten unten sind aber aktuell! ✅"
+        response = model.generate_content(prompt)
+        return response.text
 
     except Exception as e:
+        # Quota-Schutz (Fix für 429)
         if "429" in str(e):
-            return "🤖 Der KI-Lagebericht macht gerade ein kurzes Päuseli (Limit erreicht). ✅"
+            return "🤖 Der KI-Lagebericht macht gerade ein kurzes Päuseli (Limit erreicht). Die Daten unten sind aber aktuell! ✅"
         return f"🤖 Lagebericht aktuell nicht verfügbar. ({e})"
