@@ -585,12 +585,17 @@ def get_gemini_situation_report(current_data, df_history):
     try:
         import google.generativeai as genai
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        
-        # 1. ROBUSTE MODELL-AUSWAHL (Fix für 404)
-        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        selected_model = next((n for n in available_models if 'gemini-1.5-flash' in n), 
-                              next((n for n in available_models if 'gemini-pro' in n), available_models[0]))
-        model = genai.GenerativeModel(selected_model)
+    
+    # Wir probieren erst dein "2.5er", dann die stabilen 1.5er Versionen
+    # Hinweis: Falls "gemini-2.5-flash" im Code nicht erkannt wird, 
+    # nutze die genaue ID aus deinem Dashboard.
+    models_to_try = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash-exp']
+    
+    last_error = ""
+
+    for model_name in models_to_try:
+        try:
+            model = genai.GenerativeModel(model_name)
 
         # 2. TREND-DATEN VORBEREITEN
         trend_summary = ""
