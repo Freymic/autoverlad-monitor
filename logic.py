@@ -609,9 +609,10 @@ def get_gemini_situation_report(current_data, df_history):
         AUFGABE:
         - Erstelle einen kompakten Lagebericht (max. 4 Sätze).
         - Erwähne, ob die Wartezeiten gerade steigen, fallen oder stabil sind.
+        - Fasse die Lage in Richtung Wallis (Realp, Kandersteg) und in Richtung Mittelland (Oberwald, Goppenstein) zusammen.
         - Gib eine kurze Empfehlung (z.B. "Geduld einpacken" oder "Freie Fahrt").
         - Tonalität: Sachlich, hilfsbereit, leicht "schweizerisch" angehaucht.
-        - Nutze Emojis passend zur Lage (🚗, ⏳, ✅, ⚠️).
+        - Nutze sparsam Emojis passend zur Lage (🚗, ⏳, ✅, ⚠️).
         """
 
         response = model.generate_content(prompt)
