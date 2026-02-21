@@ -160,4 +160,4 @@ with report_placeholder.container():
         
         # Sobald fertig, wird der Spinner durch die hübsche Info-Box ersetzt
         st.subheader("🤖 KI-Lagebericht")
-        st.info(report, icon="🤖")
+        st.info(report)
