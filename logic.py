@@ -586,21 +586,20 @@ def get_gemini_situation_report(current_data, df_history):
         import google.generativeai as genai
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         
-        # Dynamische Modellsuche, um 404 Fehler zu vermeiden
+        # 1. ROBUSTE MODELL-AUSWAHL (Fix für 404)
         available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        # Priorität: 1.5-flash, dann 1.5-pro, dann was gerade da ist
         selected_model = next((n for n in available_models if 'gemini-1.5-flash' in n), 
                               next((n for n in available_models if 'gemini-pro' in n), available_models[0]))
-        
         model = genai.GenerativeModel(selected_model)
 
-        # Trend-Daten vorbereiten (letzte 3h)
+        # 2. TREND-DATEN VORBEREITEN
         trend_summary = ""
-        if not df_history.empty:
-            # Wir gruppieren nach Station und schauen uns die Entwicklung an
-            latest_entries = df_history.head(20) # Genug für Trends
+        if df_history is not None and not df_history.empty:
+            # Wir nehmen die letzten 20 Einträge für die Trend-Analyse
+            latest_entries = df_history.head(20) 
             trend_summary = latest_entries[['timestamp', 'station', 'minutes']].to_string()
 
+        # 3. PROMPT ERSTELLEN
         prompt = f"""
         Du bist ein Experte für Verkehrsfluss beim Schweizer Autoverlad.
         Analysiere die aktuelle Lage und den Trend der letzten Stunden:
@@ -616,7 +615,12 @@ def get_gemini_situation_report(current_data, df_history):
         - Nutze Emojis passend zur Lage (🚗, ⏳, ✅, ⚠️).
         """
 
+        # 4. KI-ABFRAGE
         response = model.generate_content(prompt)
         return response.text
+
     except Exception as e:
+        # 5. QUOTA-SCHUTZ (Fix für 429)
+        if "429" in str(e):
+            return "🤖 Der KI-Lagebericht macht gerade ein kurzes Päuseli (Limit erreicht). Die Daten unten sind aber aktuell! ✅"
         return f"🤖 Lagebericht aktuell nicht verfügbar. ({e})"
