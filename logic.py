@@ -607,9 +607,10 @@ def get_gemini_situation_report(current_data, df_history):
         HISTORIE/TREND: {trend_summary}
 
         AUFGABE:
-        - Erstelle einen kompakten Lagebericht (max. 3 Sätze). Der Text soll ohne Überschrift ausgegeben werden.
+        - Erstelle einen kompakten Lagebericht (max. 3-4 Sätze). Der Text soll ohne Überschrift ausgegeben werden.
         - Erwähne, ob die Wartezeiten gerade steigen, fallen oder stabil sind.
         - Fasse die Lage in Richtung Wallis (Realp, Kandersteg) und in Richtung Mittelland (Oberwald, Goppenstein) zusammen.
+        - Nutze Sätze wie "am Furka Autoverlad in xxx...", "Auf dem Weg ins Wallis in xxx ...", "Vor dem Autoverlad in xxx..." oder ähnlich.
         - Gib eine kurze Empfehlung (z.B. "Geduld einpacken" oder "Freie Fahrt").
         - Tonalität: Sachlich, hilfsbereit, leicht "schweizerisch" angehaucht.
         - Nutze sparsam Emojis passend zur Lage (🚗, ⏳, ✅, ⚠️).
