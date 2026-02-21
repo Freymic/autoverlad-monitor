@@ -3,18 +3,14 @@ import pandas as pd
 import sqlite3
 import altair as alt
 import datetime
-# Importiere get_loetschberg_status zusätzlich aus deiner logic.py
 from logic import (
     fetch_all_data, 
     init_db, 
-    save_to_db, 
-    save_to_google_sheets, 
     DB_NAME, 
     CH_TZ, 
     get_furka_status,
-    get_loetschberg_status  # NEU importiert
+    get_loetschberg_status
 )
-from streamlit_gsheets import GSheetsConnection
 from streamlit_autorefresh import st_autorefresh
 
 # 1. Seiteneinstellungen
@@ -22,22 +18,17 @@ st.set_page_config(page_title="Autoverlad Monitor", layout="wide")
 
 # 2. Daten initialisieren & abrufen
 init_db()  
+
+# WICHTIG: fetch_all_data() übernimmt jetzt intern save_to_db 
+# und save_to_google_sheets, damit auch Cron-Jobs sicher loggen.
 data = fetch_all_data()
+
 furka_aktiv = get_furka_status() 
-loetschberg_aktiv = get_loetschberg_status() # NEU: BLS Status prüfen
-
-# Speichern in beide Systeme
-save_to_db(data)
-gs_success = save_to_google_sheets(data)
-
-if gs_success:
-    st.toast("Cloud-Backup aktualisiert!", icon="☁️")
+loetschberg_aktiv = get_loetschberg_status()
 
 st.title("🏔️ Autoverlad Monitor")
 
-
-
-# --- NEU: ZENTRALE STATUS-MELDUNGEN ---
+# --- ZENTRALE STATUS-MELDUNGEN ---
 if not furka_aktiv or not loetschberg_aktiv:
     if not furka_aktiv:
         st.error("🚨 **Hinweis:** Der Verladbetrieb am **Furka** (Realp/Oberwald) ist aktuell **eingestellt**.")
@@ -50,7 +41,6 @@ for i, (name, d) in enumerate(data.items()):
     ist_furka = name in ["Realp", "Oberwald"]
     ist_loetsch = name in ["Kandersteg", "Goppenstein"]
     
-    # Logik für Sperrung Furka ODER Lötschberg
     gesperrt = (ist_furka and not furka_aktiv) or (ist_loetsch and not loetschberg_aktiv)
     
     if gesperrt:
@@ -61,7 +51,6 @@ for i, (name, d) in enumerate(data.items()):
             delta_color="inverse"
         )
     else:
-        # Normale Anzeige der Wartezeit
         cols[i % 4].metric(label=name, value=f"{d['min']} Min")
 
 # --- 2. DATEN LADEN (Historie für Chart) ---
@@ -74,7 +63,6 @@ st.subheader("📈 24h Trend")
 if not df.empty:
     df_plot = df.copy()
     df_plot['timestamp'] = pd.to_datetime(df_plot['timestamp'])
-    # Filter für Ausreißer (z.B. Nachtpausen/Sperren-Dummys)
     df_plot = df_plot[df_plot['minutes'] < 500]
     
     chart = alt.Chart(df_plot).mark_line(
@@ -96,19 +84,17 @@ if not df.empty:
 else:
     st.info("Noch keine Daten vorhanden.")
 
-# --- 4. DEBUG BEREICH (ERWEITERT) ---
+# --- 4. DEBUG BEREICH ---
 st.markdown("---")
 with st.expander("🛠️ Debug Informationen & Experten-Diagnose"):
-    # 1. Schnelle Status-Übersicht
     col_stat1, col_stat2 = st.columns(2)
     col_stat1.write(f"Furka-Status (RSS): **{'✅ Aktiv' if furka_aktiv else '❌ Eingestellt'}**")
     col_stat2.write(f"Lötschberg-Status (API): **{'✅ Aktiv' if loetschberg_aktiv else '❌ Eingestellt'}**")
     
-    # 2. Detaillierte Analyse-Tabs
     tab1, tab2, tab3 = st.tabs(["JSON Rohdaten", "Datenbank Historie", "Experten-Diagnose (Live)"])
     
     with tab1:
-        st.write("Aktuelle Wartezeit-Daten (fetch_all_data):")
+        st.write("Aktuelle Wartezeit-Daten:")
         st.json(data)
     
     with tab2:
@@ -118,17 +104,11 @@ with st.expander("🛠️ Debug Informationen & Experten-Diagnose"):
     with tab3:
         st.write("### Live-Abfrage der Verkehrs-Feeds")
         diag_col1, diag_col2 = st.columns(2)
-        
+        import requests
         with diag_col1:
             st.markdown("**Furka (MGB RSS)**")
             try:
-                import requests
                 f_res = requests.get("https://mgb-prod.oevfahrplan.ch/incident-manager-api/incidentmanager/rss?publicId=av_furka&lang=de", timeout=5)
-                # Wir suchen im Text nach Sperr-Begriffen für die Anzeige im Debugger
-                if "eingestellt" in f_res.text.lower() or "unterbrochen" in f_res.text.lower():
-                    st.warning("Sperr-Keywords im Furka-Feed gefunden.")
-                else:
-                    st.success("Keine Sperr-Keywords im Furka-Feed.")
                 st.text_area("Roh-Text Furka (Auszug):", f_res.text[:500], height=150)
             except Exception as e:
                 st.error(f"Fehler Furka-Feed: {e}")
@@ -136,17 +116,9 @@ with st.expander("🛠️ Debug Informationen & Experten-Diagnose"):
         with diag_col2:
             st.markdown("**Lötschberg (BLS API)**")
             try:
-                import requests
                 l_res = requests.get("https://www.bls.ch/api/TrafficInformation/GetNewNotifications?sc_lang=de&sc_site=internet-bls", 
-                                     headers={'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)'}, timeout=5)
-                bls_data = l_res.json()
-                notifications = bls_data.get("trafficInformations", [])
-                
-                if not notifications:
-                    st.success("Die BLS-Meldungsliste ist leer (Normalbetrieb).")
-                else:
-                    st.info(f"{len(notifications)} Meldung(en) gefunden.")
-                    st.json(notifications)
+                                     headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
+                st.json(l_res.json().get("trafficInformations", []))
             except Exception as e:
                 st.error(f"Fehler BLS-API: {e}")
 
