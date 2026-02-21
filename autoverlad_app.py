@@ -158,10 +158,6 @@ with report_placeholder.container():
         
         report = get_gemini_situation_report(data, df_trend)
         
-        # Sobald fertig, wird der Spinner durch die hübsche Box ersetzt
-        st.markdown(f"""
-        <div style="background-color: #f0f2f6; padding: 20px; border-radius: 10px; border-left: 5px solid #ff4b4b; margin-bottom: 20px;">
-            <h4 style="margin-top: 0;">🤖 KI-Lagebericht</h4>
-            <p style="font-size: 1.1em; line-height: 1.5;">{report}</p>
-        </div>
-        """, unsafe_allow_html=True)
+        # Sobald fertig, wird der Spinner durch die hübsche Info-Box ersetzt
+        st.subheader("🤖 KI-Lagebericht")
+        st.info(report, icon="🤖")
