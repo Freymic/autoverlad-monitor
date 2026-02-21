@@ -144,20 +144,26 @@ st_autorefresh(interval=seconds_to_wait * 1000, key="auto_sync_trigger")
 st.caption(f"Letztes Update: {now.strftime('%H:%M:%S')} | Nächstes Update in ~{int(seconds_to_wait)}s")
 
 # =====================================================================
-# --- 7. GEMINI LAGEBERICHT GANZ ZUM SCHLUSS LADEN ---
+# --- 7. GEMINI LAGEBERICHT GANZ ZUM SCHLUSS LADEN (AUF KNOPFDRUCK) ---
 # Hier greifen wir auf den Platzhalter von ganz oben zu.
 # =====================================================================
 with report_placeholder.container():
-    # Während Gemini rechnet, zeigen wir einen schicken Lade-Spinner
-    with st.spinner("🤖 KI analysiert die Verkehrslage..."):
-        with sqlite3.connect(DB_NAME) as conn:
-            df_trend = pd.read_sql_query(
-                "SELECT timestamp, station, minutes FROM stats ORDER BY timestamp DESC LIMIT 40", 
-                conn
-            )
-        
-        report = get_gemini_situation_report(data, df_trend)
-        
-        # Sobald fertig, wird der Spinner durch die hübsche Info-Box ersetzt
-        st.subheader("🤖 KI-Lagebericht")
-        st.info(report)
+    st.subheader("🤖 KI-Lagebericht")
+    
+    # Der Button: Gibt True zurück, wenn er gerade geklickt wurde
+    if st.button("Lagebericht jetzt generieren", type="primary"):
+        # Während Gemini rechnet, zeigen wir einen schicken Lade-Spinner
+        with st.spinner("🤖 KI analysiert die Verkehrslage..."):
+            with sqlite3.connect(DB_NAME) as conn:
+                df_trend = pd.read_sql_query(
+                    "SELECT timestamp, station, minutes FROM stats ORDER BY timestamp DESC LIMIT 40", 
+                    conn
+                )
+            
+            report = get_gemini_situation_report(data, df_trend)
+            
+            # Sobald fertig, wird der Spinner durch die hübsche Info-Box ersetzt
+            st.info(report, icon="🤖")
+    else:
+        # Standard-Ansicht, wenn der Button noch nicht geklickt wurde
+        st.info("Klicke auf den Button oben, um eine aktuelle KI-Analyse der Verkehrslage zu erstellen.", icon="💡")
