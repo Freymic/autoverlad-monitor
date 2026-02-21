@@ -579,3 +579,36 @@ def get_gemini_winter_report(winter_daten):
         return response.text
     except Exception as e:
         return f"🤖 Der Winter-Guide hat gerade kalte Füsse bekommen... (Fehler: {e})"
+
+def get_gemini_situation_report(current_data, df_history):
+    """Generiert einen kompakten Lagebericht basierend auf aktuellen Daten und Trends."""
+    try:
+        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+        model = genai.GenerativeModel('gemini-1.5-flash')
+
+        # Trend-Daten vorbereiten (letzte 3h)
+        trend_summary = ""
+        if not df_history.empty:
+            # Wir gruppieren nach Station und schauen uns die Entwicklung an
+            latest_entries = df_history.head(20) # Genug für Trends
+            trend_summary = latest_entries[['timestamp', 'station', 'minutes']].to_string()
+
+        prompt = f"""
+        Du bist ein Experte für Verkehrsfluss beim Schweizer Autoverlad.
+        Analysiere die aktuelle Lage und den Trend der letzten Stunden:
+        
+        AKTUELL: {current_data}
+        HISTORIE/TREND: {trend_summary}
+
+        AUFGABE:
+        - Erstelle einen extrem kompakten Lagebericht (max. 6 Sätze).
+        - Erwähne, ob die Wartezeiten gerade steigen, fallen oder stabil sind.
+        - Gib eine kurze Empfehlung (z.B. "Geduld einpacken" oder "Freie Fahrt").
+        - Tonalität: Sachlich, hilfsbereit, leicht "schweizerisch" angehaucht.
+        - Nutze Emojis passend zur Lage (🚗, ⏳, ✅, ⚠️).
+        """
+
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"🤖 Lagebericht aktuell nicht verfügbar. ({e})"
