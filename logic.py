@@ -87,14 +87,13 @@ def parse_time_to_minutes(time_str):
     return total_min
 
 def fetch_all_data():
-    """Holt Daten von Lötschberg (API) und Furka (RSS)."""
+    """Holt Daten von Lötschberg (API) und Furka (RSS) und speichert sie SOFORT."""
     results = {}
     
-    # --- TEIL 1: LÖTSCHBERG (Kandersteg & Goppenstein) ---
+    # --- TEIL 1: LÖTSCHBERG ---
     try:
         l_url = "https://www.bls.ch/api/avwV2/delays?dataSourceId={808904A8-0874-44AC-8DE3-4A5FC33D8CF1}"
         l_res = requests.get(l_url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'}).json()
-        
         for s in l_res.get("Stations", []):
             name = s.get("Station")
             if name in ["Kandersteg", "Goppenstein"]:
@@ -104,41 +103,47 @@ def fetch_all_data():
                     "raw": msg if msg else "Keine Wartezeit"
                 }
     except Exception as e:
-        print(f"Fehler Lötschberg: {e}")
+        print(f"Fehler Lötschberg Fetch: {e}")
 
-    # --- TEIL 2: FURKA (Oberwald & Realp) ---
+    # --- TEIL 2: FURKA ---
     try:
         f_url = "https://mgb-prod.oevfahrplan.ch/incident-manager-api/incidentmanager/rss?publicId=av_furka&lang=de"
         f_resp = requests.get(f_url, timeout=10)
         root = ET.fromstring(f_resp.content)
-        
         furka_found = {"Oberwald": False, "Realp": False}
-        
         for item in root.findall('.//item'):
             title = item.find('title').text or ""
             desc = item.find('description').text or ""
             full_text = f"{title} {desc}"
-            
-            if any(x in full_text.lower() for x in ["stündlich", "abfahrt"]):
-                continue
-            
+            if any(x in full_text.lower() for x in ["stündlich", "abfahrt"]): continue
             if "wartezeit" in full_text.lower():
                 val = parse_time_to_minutes(full_text)
-                if "Oberwald" in full_text and not furka_found["Oberwald"]:
-                    results["Oberwald"] = {"min": val, "raw": full_text}
-                    furka_found["Oberwald"] = True
-                elif "Realp" in full_text and not furka_found["Realp"]:
-                    results["Realp"] = {"min": val, "raw": full_text}
-                    furka_found["Realp"] = True
-        
-        if not furka_found["Oberwald"]: results["Oberwald"] = {"min": 0, "raw": "Keine Meldung"}
-        if not furka_found["Realp"]: results["Realp"] = {"min": 0, "raw": "Keine Meldung"}
-            
+                for loc in furka_found.keys():
+                    if loc in full_text and not furka_found[loc]:
+                        results[loc] = {"min": val, "raw": full_text}
+                        furka_found[loc] = True
+        for loc, found in furka_found.items():
+            if not found: results[loc] = {"min": 0, "raw": "Keine Meldung"}
     except Exception as e:
-        print(f"Fehler Furka: {e}")
-    
-    return results
+        print(f"Fehler Furka Fetch: {e}")
 
+    # --- NEU: AUTOMATISCHER SPEICHER-TRIGGER ---
+    if results:
+        # Wir speichern direkt hier, damit der Cron-Job Erfolg hat, 
+        # sobald die Daten einmal im RAM sind.
+        save_to_db(results)
+        
+        # Google Sheets Sync nur auf PRD (um DEV-Traffic zu sparen)
+        # Wir prüfen das anhand des Worksheet-Namens in den Secrets
+        try:
+            current_ws = st.secrets["connections"]["gsheets"]["worksheet"]
+            if current_ws != "Development": 
+                save_to_google_sheets(results)
+        except:
+            pass 
+
+    return results
+    
 def save_to_db(data):
     """Speichert Daten exakt im 5-Minuten-Takt in die SQLite DB."""
     try:
