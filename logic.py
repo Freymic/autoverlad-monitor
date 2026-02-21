@@ -583,8 +583,16 @@ def get_gemini_winter_report(winter_daten):
 def get_gemini_situation_report(current_data, df_history):
     """Generiert einen kompakten Lagebericht basierend auf aktuellen Daten und Trends."""
     try:
+        import google.generativeai as genai
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        # Dynamische Modellsuche, um 404 Fehler zu vermeiden
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        # Priorität: 1.5-flash, dann 1.5-pro, dann was gerade da ist
+        selected_model = next((n for n in available_models if 'gemini-1.5-flash' in n), 
+                              next((n for n in available_models if 'gemini-pro' in n), available_models[0]))
+        
+        model = genai.GenerativeModel(selected_model)
 
         # Trend-Daten vorbereiten (letzte 3h)
         trend_summary = ""
