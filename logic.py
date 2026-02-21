@@ -607,7 +607,7 @@ def get_gemini_situation_report(current_data, df_history):
         HISTORIE/TREND: {trend_summary}
 
         AUFGABE:
-        - Erstelle einen kompakten Lagebericht (max. 4 Sätze).
+        - Erstelle einen kompakten Lagebericht (max. 3 Sätze). Der Text soll ohne Überschrift ausgegeben werden.
         - Erwähne, ob die Wartezeiten gerade steigen, fallen oder stabil sind.
         - Fasse die Lage in Richtung Wallis (Realp, Kandersteg) und in Richtung Mittelland (Oberwald, Goppenstein) zusammen.
         - Gib eine kurze Empfehlung (z.B. "Geduld einpacken" oder "Freie Fahrt").
