@@ -14,23 +14,22 @@ import google.generativeai as genai
 DB_NAME = 'autoverlad.db'
 CH_TZ = pytz.timezone('Europe/Zurich')
 
-# --- ZENTRALE ROBUSTE KI-LOGIK (Zusammenführung deiner Logik mit Fehler-Fallback) ---
+# --- ZENTRALE ROBUSTE KI-LOGIK MIT FREUNDLICHER FEHLERMELDUNG ---
 def generate_content_with_fallback(prompt):
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        # Deine dynamische Modellsuche
+        
+        # Dynamische Modellsuche
         available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         
-        # Priorisierte Liste (deine Favoriten zuerst)
+        # Priorisierte Liste
         preferred_order = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-pro']
         
-        # Erstelle eine Liste der zu testenden Modelle basierend auf Verfügbarkeit
         models_to_try = []
         for pref in preferred_order:
             found = [m for m in available_models if pref in m]
             models_to_try.extend(found)
         
-        # Falls keines der bevorzugten Modelle gefunden wurde, nimm alle verfügbaren
         if not models_to_try:
             models_to_try = available_models
 
@@ -42,14 +41,24 @@ def generate_content_with_fallback(prompt):
                 return response.text
             except Exception as e:
                 last_error = str(e)
-                # Bei Quota (429) oder Modell-Fehlern (404) -> nächstes Modell
-                if any(x in last_error.lower() for x in ["429", "404", "not found", "limit"]):
+                # Falls das Limit erreicht ist (429), sofort die schöne Meldung zurückgeben
+                if "429" in last_error:
+                    return "🤖 Der KI-Lagebericht macht gerade ein kurzes Päuseli (Limit erreicht). Die Daten unten sind aber aktuell! ✅"
+                
+                # Bei anderen Fehlern (z.B. 404) nächstes Modell versuchen
+                if any(x in last_error.lower() for x in ["404", "not found"]):
                     continue
                 else:
                     break
-        return f"KI aktuell nicht erreichbar. Letzter Fehler: {last_error}"
+        
+        # Wenn alle Modelle durchprobiert wurden oder ein unbekannter Fehler auftrat
+        return "🤖 Der KI-Lagebericht macht gerade ein kurzes Päuseli. Die Live-Daten unten sind aber aktuell! ✅"
+
     except Exception as e:
-        return f"KI-Fehler: {e}"
+        # Falls die API-Konfiguration selbst wegen Quota scheitert
+        if "429" in str(e):
+            return "🤖 Der KI-Lagebericht macht gerade ein kurzes Päuseli (Limit erreicht). Die Daten unten sind aber aktuell! ✅"
+        return "🤖 Lagebericht aktuell nicht verfügbar. Die Live-Daten unten sind aber aktuell! ✅"
 
 # --- DATENBANK & FETCH LOGIK (UNVERÄNDERT) ---
 
