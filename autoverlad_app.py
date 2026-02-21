@@ -20,8 +20,6 @@ st.set_page_config(page_title="Autoverlad Monitor", layout="wide")
 # 2. Daten initialisieren & abrufen
 init_db()  
 
-# WICHTIG: fetch_all_data() übernimmt jetzt intern save_to_db 
-# und save_to_google_sheets, damit auch Cron-Jobs sicher loggen.
 data = fetch_all_data()
 
 furka_aktiv = get_furka_status() 
@@ -29,26 +27,9 @@ loetschberg_aktiv = get_loetschberg_status()
 
 st.title("🏔️ Autoverlad Monitor")
 
-# --- NEU: GEMINI LAGEBERICHT ---
-with st.container():
-    # Wir nehmen die df-Historie von unten (die letzten 24h)
-    # und übergeben sie der Funktion
-    with sqlite3.connect(DB_NAME) as conn:
-        # Wir holen kurz die Daten für den Bericht
-        df_trend = pd.read_sql_query(
-            "SELECT timestamp, station, minutes FROM stats ORDER BY timestamp DESC LIMIT 40", 
-            conn
-        )
-    
-    report = get_gemini_situation_report(data, df_trend)
-    
-    # Hübsche Darstellung in einer Info-Box
-    st.markdown(f"""
-    <div style="background-color: #f0f2f6; padding: 20px; border-radius: 10px; border-left: 5px solid #ff4b4b; margin-bottom: 20px;">
-        <h4 style="margin-top: 0;">🤖 KI-Lagebericht</h4>
-        <p style="font-size: 1.1em; line-height: 1.5;">{report}</p>
-    </div>
-    """, unsafe_allow_html=True)
+# --- NEU: PLATZHALTER FÜR DEN LAGEBERICHT ---
+# st.empty() reserviert den Platz oben. Wir füllen ihn ganz am Schluss.
+report_placeholder = st.empty()
 
 # --- ZENTRALE STATUS-MELDUNGEN ---
 if not furka_aktiv or not loetschberg_aktiv:
@@ -161,3 +142,26 @@ if seconds_to_wait < 10:
 
 st_autorefresh(interval=seconds_to_wait * 1000, key="auto_sync_trigger")
 st.caption(f"Letztes Update: {now.strftime('%H:%M:%S')} | Nächstes Update in ~{int(seconds_to_wait)}s")
+
+# =====================================================================
+# --- 7. GEMINI LAGEBERICHT GANZ ZUM SCHLUSS LADEN ---
+# Hier greifen wir auf den Platzhalter von ganz oben zu.
+# =====================================================================
+with report_placeholder.container():
+    # Während Gemini rechnet, zeigen wir einen schicken Lade-Spinner
+    with st.spinner("🤖 KI analysiert die Verkehrslage..."):
+        with sqlite3.connect(DB_NAME) as conn:
+            df_trend = pd.read_sql_query(
+                "SELECT timestamp, station, minutes FROM stats ORDER BY timestamp DESC LIMIT 40", 
+                conn
+            )
+        
+        report = get_gemini_situation_report(data, df_trend)
+        
+        # Sobald fertig, wird der Spinner durch die hübsche Box ersetzt
+        st.markdown(f"""
+        <div style="background-color: #f0f2f6; padding: 20px; border-radius: 10px; border-left: 5px solid #ff4b4b; margin-bottom: 20px;">
+            <h4 style="margin-top: 0;">🤖 KI-Lagebericht</h4>
+            <p style="font-size: 1.1em; line-height: 1.5;">{report}</p>
+        </div>
+        """, unsafe_allow_html=True)
