@@ -9,7 +9,8 @@ from logic import (
     DB_NAME, 
     CH_TZ, 
     get_furka_status,
-    get_loetschberg_status
+    get_loetschberg_status,
+    get_gemini_situation_report
 )
 from streamlit_autorefresh import st_autorefresh
 
